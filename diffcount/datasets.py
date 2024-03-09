@@ -1,0 +1,221 @@
+import os
+import cv2
+import json
+import torch
+import numpy as np
+from PIL import Image
+import random
+import torchvision.datasets as thdata
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
+from torch.utils.data import Dataset, DataLoader, Subset
+from typing import Literal
+
+
+class MNIST(Dataset):
+
+	def __init__(
+		self, 
+		data_root, 
+		split='train'
+	):
+		self.dataset = thdata.MNIST(
+			root=data_root,
+			train=True if split == 'train' else False,
+			download=True,
+			transform=transforms.Compose([
+				transforms.ToTensor(), transforms.Lambda(lambda x: x * 2.0 - 1.0)
+			])
+		)
+	
+	def __len__(self):
+		return len(self.dataset)
+	
+	def __getitem__(self, index):
+		img, cls = self.dataset[index]
+		cls = torch.tensor(cls)
+		return img, dict(cls=cls)
+
+
+class FSC147(Dataset):
+	"""
+	:param data_root: data_root directory of dataset.
+	:param target_dirname: Name of the directory containing the GT maps.
+	:param split: 'train', 'val' or 'test'.
+	:param n_examplars: Number of examplars
+	:param target_transform: Optional transforms to be applied to the density map.
+
+	Make sure the data_root directory has the following structure:
+
+   data_root
+	├── images_384_VarV2
+	│       ├─ 2.jpg
+	│       ├─ 3.jpg
+	│       ├─ ...
+	│       └─ 7714.jpg
+	├── annotation_FSC147_384.json
+	├── Train_Test_Val_FSC_147.json                         
+	├── target_dirname
+	│       ├─ 2.npy
+	│       ├─ 3.npy
+	│       ├─ ...
+	│       └─ 7714.npy
+	└── ImageClasses_FSC147.json	(optional)
+
+	"""
+
+	def __init__(
+			self,
+			data_root: str,
+			target_dirname: str,
+			split: Literal['train', 'val', 'test'] = 'train',
+			n_examplars: int = 3,
+			transform_kwargs: dict = dict(),
+	):
+		self.data_root = data_root
+		self.target_dirname = target_dirname
+		self.split = split
+		self.n_examplars = n_examplars
+
+		self.img_size = transform_kwargs.pop("img_size", 256)
+		self.hflip_p = transform_kwargs.pop("hflip_p", 0.5)
+		self.cj_p = transform_kwargs.pop("cj_p", 0.8)
+
+		self.img_names = None
+		with open(os.path.join(self.data_root, 'Train_Test_Val_FSC_147.json'), 'rb') as f:
+			self.img_names = json.load(f)[self.split]
+
+		self.annotations = None
+		with open(os.path.join(self.data_root, 'annotation_FSC147_384.json'), 'rb') as f:
+			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
+
+
+	def transform(self, img, bboxes, target, split='train'):
+		# ToTensor
+		img = F.to_tensor(img) # (C, H, W)
+		target = F.to_tensor(target)
+
+		# Resize
+		old_h, old_w = img.shape[-2:]
+		img = F.resize(img, (self.img_size, self.img_size), antialias=True)
+		# Resizing density maps at this stage results in an incorrect DM (gaussians have < 1 or > 1 cumulative sum).
+		# To avoid this, specify the target image size in the generate_density_maps function.
+		if target.shape[-2:] != img.shape[-2:]:
+			original_sum = target.sum()
+			target = F.resize(target, (self.img_size, self.img_size), antialias=True)
+			target = target / target.sum() * original_sum
+			# raise ValueError(f'Target shape {target.shape} does not match image shape {img.shape}')
+
+		new_h, new_w = img.shape[-2:]
+		rw = new_w / old_w
+		rh = new_h / old_h
+		bboxes = bboxes * torch.tensor([rw, rh, rw, rh])
+
+		if split == 'train':
+			# RandomHorizontalFlip
+			if torch.rand(1) < self.hflip_p:
+				img = F.hflip(img)
+				target = F.hflip(target)
+				bboxes[:, [0, 2]] = self.img_size - bboxes[:, [2, 0]]
+
+			# RandomColorJitter
+			if torch.rand(1) < self.cj_p:
+				img = transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)(img)
+
+		# Rescale to [-1, 1]
+		img = img * 2.0 - 1.0
+		target = target * 2.0 - 1.0
+		return img, bboxes, target
+
+
+	def __len__(self):
+		return len(self.img_names)
+
+
+	def __getitem__(self, index):
+		if torch.is_tensor(index):
+			index = index.tolist()
+
+		img = Image.open(
+			os.path.join(
+				self.data_root,
+				'images_384_VarV2',
+				self.img_names[index]
+			)
+		).convert('RGB')
+
+		target = np.load(
+			os.path.join(
+				self.data_root,
+				self.target_dirname,
+				os.path.splitext(self.img_names[index])[0] + '.npy'
+			)
+		)
+
+		bboxes = torch.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
+		assert len(bboxes) >= self.n_examplars, f'Not enough examplars for image {self.img_names[index]}'
+		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)[:self.n_examplars, ...]											# (x_min, y_min, x_max, y_max)
+
+		img, bboxes, target = self.transform(img, bboxes, target, split=self.split)
+		return target, dict(bboxes=bboxes, img=img)
+
+
+def generate_density_maps(data_rootdir, ksize, sigma, size=None, dtype=np.float32):
+	"""
+	Generates GT density maps from dot annotations and saves them to data_rootdir.
+	"""
+	size_str = "OG" if size is None else f"{size[0]}x{size[1]}"
+	savedir = os.path.join(data_rootdir, f'gt_density_maps_ksize={ksize}_sig={sigma}_size={size_str}')
+	if not os.path.isdir(savedir):
+		os.makedirs(savedir)
+	with open(os.path.join(data_rootdir, 'annotation_FSC147_384.json'), 'rb') as f:
+		annotations = json.load(f)
+		for img_name, ann in annotations.items():
+			w, h = Image.open(
+				os.path.join(
+					data_rootdir,
+					'images_384_VarV2',
+					img_name
+				)
+			).size
+			new_w, new_h = size if size is not None else (w, h)
+			rw, rh = new_w / w, new_h / h
+			bitmap = np.zeros((new_h, new_w), dtype=dtype)
+			for point in ann['points']:
+				x, y = int(point[0] * rw)-1, int(point[1] * rh)-1
+				# x, y = int(point[0])-1, int(point[1])-1
+				bitmap[y, x] = 1.0
+			density_map = cv2.GaussianBlur(bitmap, (ksize, ksize), sigma) #TODO change to scipy.ndimage.gaussian_filter
+			np.save(
+				os.path.join(savedir, os.path.splitext(img_name)[0] + '.npy'), 
+				density_map
+			)
+			print(f'{img_name}.npy saved')
+
+
+
+def load_data(
+	*,
+	dataset,
+	batch_size,
+	shuffle=False,
+	overfit_single_batch=False,
+):
+	"""
+	For a dataset, create a dataloader of (target, kwargs) pairs.
+
+	Each images is an NCHW float tensor, and the kwargs dict contains zero or
+	more keys, each of which map to a batched Tensor of their own.
+
+	:param dataset: The dataset to iterate over.
+	:param batch_size: the batch size of each returned pair.
+	:param shuffle: if True, yield results in a shuffle order.
+	:param overfit_single_batch: if True, only return a single batch of data.
+	"""
+	if overfit_single_batch:
+		ixs = [random.randint(0, len(dataset) - 1) for _ in range(batch_size)]
+		dataset = Subset(dataset, ixs)
+	loader = DataLoader(
+		dataset, batch_size=batch_size, shuffle=shuffle, num_workers=1, drop_last=False
+	)
+	return loader
