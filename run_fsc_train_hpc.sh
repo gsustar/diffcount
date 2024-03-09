@@ -57,4 +57,5 @@ TRAIN_FLAGS=" \
 WANDB_FLAGS=" \
 	--wandb_mode online \
 "
-python fsc_train.py $DATA_DIR $LOG_DIR $DIFFUSION_FLAGS $MODEL_FLAGS $TRAIN_FLAGS $WANDB_FLAGS
+srun --kill-on-bad-exit=1 \
+	python fsc_train.py $DATA_DIR $LOG_DIR $DIFFUSION_FLAGS $MODEL_FLAGS $TRAIN_FLAGS $WANDB_FLAGS

@@ -1,15 +1,17 @@
 import os
-import cv2
 import json
-import torch
-import numpy as np
-from PIL import Image
 import random
+import numpy as np
+import torch as th
+
+from PIL import Image
+from typing import Literal
+
 import torchvision.datasets as thdata
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
+
 from torch.utils.data import Dataset, DataLoader, Subset
-from typing import Literal
 
 
 class MNIST(Dataset):
@@ -33,7 +35,7 @@ class MNIST(Dataset):
 	
 	def __getitem__(self, index):
 		img, cls = self.dataset[index]
-		cls = torch.tensor(cls)
+		cls = th.tensor(cls)
 		return img, dict(cls=cls)
 
 
@@ -109,17 +111,17 @@ class FSC147(Dataset):
 		new_h, new_w = img.shape[-2:]
 		rw = new_w / old_w
 		rh = new_h / old_h
-		bboxes = bboxes * torch.tensor([rw, rh, rw, rh])
+		bboxes = bboxes * th.tensor([rw, rh, rw, rh])
 
 		if split == 'train':
 			# RandomHorizontalFlip
-			if torch.rand(1) < self.hflip_p:
+			if th.rand(1) < self.hflip_p:
 				img = F.hflip(img)
 				target = F.hflip(target)
 				bboxes[:, [0, 2]] = self.img_size - bboxes[:, [2, 0]]
 
 			# RandomColorJitter
-			if torch.rand(1) < self.cj_p:
+			if th.rand(1) < self.cj_p:
 				img = transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)(img)
 
 		# Rescale to [-1, 1]
@@ -133,7 +135,7 @@ class FSC147(Dataset):
 
 
 	def __getitem__(self, index):
-		if torch.is_tensor(index):
+		if th.is_tensor(index):
 			index = index.tolist()
 
 		img = Image.open(
@@ -152,46 +154,12 @@ class FSC147(Dataset):
 			)
 		)
 
-		bboxes = torch.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
+		bboxes = th.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
 		assert len(bboxes) >= self.n_examplars, f'Not enough examplars for image {self.img_names[index]}'
 		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)[:self.n_examplars, ...]											# (x_min, y_min, x_max, y_max)
 
 		img, bboxes, target = self.transform(img, bboxes, target, split=self.split)
 		return target, dict(bboxes=bboxes, img=img)
-
-
-def generate_density_maps(data_rootdir, ksize, sigma, size=None, dtype=np.float32):
-	"""
-	Generates GT density maps from dot annotations and saves them to data_rootdir.
-	"""
-	size_str = "OG" if size is None else f"{size[0]}x{size[1]}"
-	savedir = os.path.join(data_rootdir, f'gt_density_maps_ksize={ksize}_sig={sigma}_size={size_str}')
-	if not os.path.isdir(savedir):
-		os.makedirs(savedir)
-	with open(os.path.join(data_rootdir, 'annotation_FSC147_384.json'), 'rb') as f:
-		annotations = json.load(f)
-		for img_name, ann in annotations.items():
-			w, h = Image.open(
-				os.path.join(
-					data_rootdir,
-					'images_384_VarV2',
-					img_name
-				)
-			).size
-			new_w, new_h = size if size is not None else (w, h)
-			rw, rh = new_w / w, new_h / h
-			bitmap = np.zeros((new_h, new_w), dtype=dtype)
-			for point in ann['points']:
-				x, y = int(point[0] * rw)-1, int(point[1] * rh)-1
-				# x, y = int(point[0])-1, int(point[1])-1
-				bitmap[y, x] = 1.0
-			density_map = cv2.GaussianBlur(bitmap, (ksize, ksize), sigma) #TODO change to scipy.ndimage.gaussian_filter
-			np.save(
-				os.path.join(savedir, os.path.splitext(img_name)[0] + '.npy'), 
-				density_map
-			)
-			print(f'{img_name}.npy saved')
-
 
 
 def load_data(
