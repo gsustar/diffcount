@@ -6,8 +6,7 @@ from torchvision.utils import make_grid
 
 def _ready_for_plotting(t):
 	return (
-		t.ndim == 3
-		and t.dtype == np.uint8
+		t.dtype == th.uint8
 		and t.min() >= 0
 		and t.max() <= 255
 	)
@@ -22,10 +21,8 @@ def _maybe_to_plotting_range(x):
 		.mul_(255)
 		.add_(0.5)
 		.clamp_(0, 255)
-		.permute(1, 2, 0)
 		.to("cpu", th.uint8)
 		.detach()
-		.numpy()
 	)
 
 def to_pil_image(tensor, **grid_kwargs):
@@ -34,15 +31,16 @@ def to_pil_image(tensor, **grid_kwargs):
 			np.sqrt(tensor.shape[0])
 		),
 		padding=2,
-		pad_value=-1.0
+		pad_value=0.0
 	)
 	grid_defaults.update(grid_kwargs)
+	tensor = _maybe_to_plotting_range(tensor)
 	grid = make_grid(tensor, **grid_defaults)
-	ndarr = _maybe_to_plotting_range(grid)
-	return Image.fromarray(ndarr)
+	grid = grid.permute(1, 2, 0)
+	grid = grid.numpy()
+	return Image.fromarray(grid)
 
 def draw_bboxes(t, bboxes):
-	print(t.shape)
 	imgs = [
 		torchvision.utils.draw_bounding_boxes(
 			img, boxes=bboxes[i], colors="red"

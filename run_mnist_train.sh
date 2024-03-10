@@ -1,8 +1,8 @@
 DATA_DIR=" \
-	--data_dir .data/mnist \
+	--datadir ../.data/mnist \
 "
 LOG_DIR=" \
-	--log_dir experiments/dummy/
+	--logdir ../experiments/dummy/
 "
 DIFFUSION_FLAGS=" \
 	--deblur_diffusion True \
@@ -16,7 +16,6 @@ DIFFUSION_FLAGS=" \
 	--loss_type l1 \
 	--delta 0.01 \
 	--image_size 28 \
-	--deblur_diffusion True \
 "
 MODEL_FLAGS=" \
 	--in_channels 1 \
@@ -45,6 +44,6 @@ TRAIN_FLAGS=" \
 	--warmup 0
 "
 WANDB_FLAGS=" \
-	--wandb_mode online \
+	--wandb_mode disabled \
 "
 python mnist_train.py $DATA_DIR $LOG_DIR $DIFFUSION_FLAGS $MODEL_FLAGS $TRAIN_FLAGS $WANDB_FLAGS

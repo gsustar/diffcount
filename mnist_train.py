@@ -25,15 +25,15 @@ def main():
 	try:
 		args = create_argparser().parse_args()
 		now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-		args.log_dir = osp.join(
-			args.log_dir,
+		args.logdir = osp.join(
+			args.logdir,
 			"mnist",
 			now
-		) if args.log_dir else None
+		) if args.logdir else None
 		
 		pprint.pprint(vars(args))
 		logger.configure(
-			dir=args.log_dir, 
+			dir=args.logdir, 
 			format_strs=['stdout', 'log', 'wandb'],
 			wandb_kwargs=dict(
 				project="diffcount",
@@ -56,13 +56,13 @@ def main():
 
 		logger.log("creating data loader...")
 		train_data = load_data(
-			dataset=MNIST(data_root=args.data_dir, split='train'),
+			dataset=MNIST(root=args.datadir, split='train'),
 			batch_size=args.batch_size,
 			shuffle=True,
 			overfit_single_batch=args.overfit_single_batch,
 		)
 		val_data = load_data(
-			dataset=MNIST(data_root=args.data_dir, split='val'),
+			dataset=MNIST(root=args.datadir, split='val'),
 			batch_size=args.batch_size,
 			shuffle=False,
 		) if not args.overfit_single_batch else train_data
@@ -106,8 +106,8 @@ def main():
 
 def create_argparser():
 	defaults = dict(
-		data_dir="",
-		log_dir="",
+		datadir="",
+		logdir="",
 		schedule_sampler="uniform",
 		lr=1e-4,
 		weight_decay=0.0,

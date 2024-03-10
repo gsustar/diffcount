@@ -25,15 +25,15 @@ def main():
 	try:
 		args = create_argparser().parse_args()
 		now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-		args.log_dir = osp.join(
-			args.log_dir,
-			"mnist",
+		args.logdir = osp.join(
+			args.logdir,
+			"fsc147",
 			now
-		) if args.log_dir else None
+		) if args.logdir else None
 		
 		pprint.pprint(vars(args))
 		logger.configure(
-			dir=args.log_dir, 
+			dir=args.logdir, 
 			format_strs=['stdout', 'log', 'wandb'],
 			wandb_kwargs=dict(
 				project="diffcount",
@@ -57,8 +57,8 @@ def main():
 		logger.log("creating data loader...")
 		train_data = load_data(
 			dataset=FSC147(
-				data_root=args.data_dir,
-				target_dirname=args.target_dirname,
+				root=args.datadir,
+				targetdir=args.targetdir,
 				split='train',
 				transform_kwargs=dict(
 					img_size=args.image_size
@@ -70,8 +70,8 @@ def main():
 		)
 		val_data = load_data(
 			dataset=FSC147(
-				data_root=args.data_dir,
-				target_dirname=args.target_dirname,
+				root=args.datadir,
+				targetdir=args.targetdir,
 				split='val',
 				transform_kwargs=dict(
 					img_size=args.image_size
@@ -117,9 +117,9 @@ def main():
 
 def create_argparser():
 	defaults = dict(
-		data_dir="",
-		log_dir="",
-		target_dirname="",
+		datadir="",
+		logdir="",
+		targetdir="",
 		schedule_sampler="uniform",
 		lr=1e-4,
 		weight_decay=0.0,
@@ -133,7 +133,6 @@ def create_argparser():
 		overfit_single_batch=False,
 		wandb_mode="online",
 		num_epochs=100,
-		class_cond=False,
 		warmup=0,
 		grad_clip=0.0,
 	)

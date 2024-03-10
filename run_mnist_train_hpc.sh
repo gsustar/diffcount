@@ -13,10 +13,10 @@
 export WANDB__SERVICE_WAIT=300
 
 DATA_DIR=" \
-	--data_dir /d/hpc/projects/FRI/DL/gs1121/.data/mnist \
+	--datadir /d/hpc/projects/FRI/DL/gs1121/.data/mnist \
 "
 LOG_DIR=" \
-	--log_dir /d/hpc/projects/FRI/DL/gs1121/logs
+	--logdir /d/hpc/projects/FRI/DL/gs1121/logs
 "
 DIFFUSION_FLAGS=" \
 	--deblur_diffusion True \
@@ -30,7 +30,6 @@ DIFFUSION_FLAGS=" \
 	--loss_type l1 \
 	--delta 0.01 \
 	--image_size 28 \
-	--deblur_diffusion True \
 "
 MODEL_FLAGS=" \
 	--in_channels 1 \

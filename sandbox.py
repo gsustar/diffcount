@@ -1,7 +1,6 @@
 import torch as th
 import numpy as np
 from diffcount.datasets import MNIST, load_data
-from kornia.filters import gaussian_blur2d
 import matplotlib.pyplot as plt
 import time
 from diffcount.plot_utils import to_pil_image
@@ -164,7 +163,6 @@ def main2():
 
 if __name__ == "__main__":
 	main2()
-
 	# x = th.zeros(4, 1, 10, 10)
 	# x[0, 0, 5, 5] = 1.0
 	# sigma = 1.0

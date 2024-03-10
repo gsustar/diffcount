@@ -18,11 +18,11 @@ class MNIST(Dataset):
 
 	def __init__(
 		self, 
-		data_root, 
+		root, 
 		split='train'
 	):
 		self.dataset = thdata.MNIST(
-			root=data_root,
+			root=root,
 			train=True if split == 'train' else False,
 			download=True,
 			transform=transforms.Compose([
@@ -41,15 +41,15 @@ class MNIST(Dataset):
 
 class FSC147(Dataset):
 	"""
-	:param data_root: data_root directory of dataset.
-	:param target_dirname: Name of the directory containing the GT maps.
+	:param root: root directory of dataset.
+	:param targetdir: Name of the directory containing the GT maps.
 	:param split: 'train', 'val' or 'test'.
 	:param n_examplars: Number of examplars
 	:param target_transform: Optional transforms to be applied to the density map.
 
-	Make sure the data_root directory has the following structure:
+	Make sure the root directory has the following structure:
 
-   data_root
+   root
 	├── images_384_VarV2
 	│       ├─ 2.jpg
 	│       ├─ 3.jpg
@@ -57,7 +57,7 @@ class FSC147(Dataset):
 	│       └─ 7714.jpg
 	├── annotation_FSC147_384.json
 	├── Train_Test_Val_FSC_147.json                         
-	├── target_dirname
+	├── targetdir
 	│       ├─ 2.npy
 	│       ├─ 3.npy
 	│       ├─ ...
@@ -68,14 +68,14 @@ class FSC147(Dataset):
 
 	def __init__(
 			self,
-			data_root: str,
-			target_dirname: str,
+			root: str,
+			targetdir: str,
 			split: Literal['train', 'val', 'test'] = 'train',
 			n_examplars: int = 3,
 			transform_kwargs: dict = dict(),
 	):
-		self.data_root = data_root
-		self.target_dirname = target_dirname
+		self.root = root
+		self.targetdir = targetdir
 		self.split = split
 		self.n_examplars = n_examplars
 
@@ -84,11 +84,11 @@ class FSC147(Dataset):
 		self.cj_p = transform_kwargs.pop("cj_p", 0.8)
 
 		self.img_names = None
-		with open(os.path.join(self.data_root, 'Train_Test_Val_FSC_147.json'), 'rb') as f:
+		with open(os.path.join(self.root, 'Train_Test_Val_FSC_147.json'), 'rb') as f:
 			self.img_names = json.load(f)[self.split]
 
 		self.annotations = None
-		with open(os.path.join(self.data_root, 'annotation_FSC147_384.json'), 'rb') as f:
+		with open(os.path.join(self.root, 'annotation_FSC147_384.json'), 'rb') as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
 
@@ -100,13 +100,11 @@ class FSC147(Dataset):
 		# Resize
 		old_h, old_w = img.shape[-2:]
 		img = F.resize(img, (self.img_size, self.img_size), antialias=True)
-		# Resizing density maps at this stage results in an incorrect DM (gaussians have < 1 or > 1 cumulative sum).
-		# To avoid this, specify the target image size in the generate_density_maps function.
+		# Preferably create density maps with the same size as the input images and avoid resizing at this stage
 		if target.shape[-2:] != img.shape[-2:]:
 			original_sum = target.sum()
 			target = F.resize(target, (self.img_size, self.img_size), antialias=True)
 			target = target / target.sum() * original_sum
-			# raise ValueError(f'Target shape {target.shape} does not match image shape {img.shape}')
 
 		new_h, new_w = img.shape[-2:]
 		rw = new_w / old_w
@@ -140,7 +138,7 @@ class FSC147(Dataset):
 
 		img = Image.open(
 			os.path.join(
-				self.data_root,
+				self.root,
 				'images_384_VarV2',
 				self.img_names[index]
 			)
@@ -148,8 +146,8 @@ class FSC147(Dataset):
 
 		target = np.load(
 			os.path.join(
-				self.data_root,
-				self.target_dirname,
+				self.root,
+				self.targetdir,
 				os.path.splitext(self.img_names[index])[0] + '.npy'
 			)
 		)

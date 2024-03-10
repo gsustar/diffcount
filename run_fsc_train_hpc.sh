@@ -13,11 +13,11 @@
 export WANDB__SERVICE_WAIT=300
 
 DATA_DIR=" \
-	--data_dir /d/hpc/projects/FRI/DL/gs1121/FSC147_384_V2/ \
-	--target_dirname gt_density_maps_ksize=3_sig=0.25_size=256x256
+	--datadir /d/hpc/projects/FRI/DL/gs1121/FSC147_384_V2/ \
+	--targetdir gt_density_maps_ksize=3_sig=0.25_size=256x256
 "
 LOG_DIR=" \
-	--log_dir /d/hpc/projects/FRI/DL/gs1121/logs \
+	--logdir /d/hpc/projects/FRI/DL/gs1121/logs \
 "
 DIFFUSION_FLAGS=" \
 	--deblur_diffusion True \
@@ -31,7 +31,6 @@ DIFFUSION_FLAGS=" \
 	--loss_type l1 \
 	--delta 0.01 \
 	--image_size 256 \
-	--deblur_diffusion True \
 "
 
 MODEL_FLAGS=" \
@@ -48,7 +47,7 @@ MODEL_FLAGS=" \
 "
 TRAIN_FLAGS=" \
 	--batch_size 4 \
-	--lr 1e-4 \
+	--lr 3e-4 \
 	--save_interval 10000 \
 	--overfit_single_batch True \
 	--validation_interval 200 \

@@ -9,8 +9,7 @@ from scipy.ndimage import gaussian_filter
 
 def generate_density_maps(root, sigma, size=None, dtype=np.float32):
 	size_str = size or 'original'
-	savedir = os.path.join(root, "densitymaps", f'sig{sigma}', f'size{size_str}')
-	# if not os.path.isdir(savedir):
+	savedir = os.path.join(root, "densitymaps", f'sig_{sigma}', f'size_{size_str}')
 	os.makedirs(savedir, exist_ok=True)
 	with open(os.path.join(root, 'annotation_FSC147_384.json'), 'rb') as f:
 		annotations = json.load(f)
@@ -22,7 +21,7 @@ def generate_density_maps(root, sigma, size=None, dtype=np.float32):
 					img_name
 				)
 			).size
-			new_w, new_h = size if size is not None else (w, h)
+			new_w, new_h = (size, size) if size is not None else (w, h)
 			rw, rh = new_w / w, new_h / h
 			bitmap = np.zeros((new_h, new_w), dtype=dtype)
 			for point in ann['points']:
@@ -51,7 +50,8 @@ def main():
 
 	generate_density_maps(
 		root=args.root, 
-		sigma=args.sigma, 
+		sigma=args.sigma,
+		size=args.size
 	)
 
 
