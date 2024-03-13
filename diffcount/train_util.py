@@ -44,7 +44,6 @@ class TrainLoop:
 		schedule_sampler=None,
 		weight_decay=0.0,
 		num_epochs=0,
-		warmup=0,
 		grad_clip=0.0,
 	):
 		self.model = model
@@ -63,7 +62,6 @@ class TrainLoop:
 		self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
 		self.weight_decay = weight_decay
 		self.num_epochs = num_epochs
-		self.warmup = warmup
 		self.grad_clip = grad_clip
 
 		self.step = 0
@@ -158,19 +156,10 @@ class TrainLoop:
 		loss = (losses["loss"] * weights).mean()
 
 		self.scaler.scale(loss).backward()
-
-		"""Optimizes with warmup and gradient clipping (disabled if negative).
-		Before that, unscales the gradients to the regular range from the 
-		scaled values for automatic mixed precision"""
 		self.scaler.unscale_(self.opt)
-		# TODO: rewrite as scheduler
-		if self.warmup > 0:
-			for g in self.optimizer.param_groups:
-				g['lr'] = self.lr * np.minimum(self.step / self.warmup, 1.0)
-				# g['lr'] = self.lr * min((self.step + self.resume_step) / self.warmup, 1.0)
 
 		grad_norm, param_norm = self.compute_norms()
-		if self.grad_clip >= 0:
+		if self.grad_clip > 0:
 			th.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip)
 
 		self.scaler.step(self.opt)

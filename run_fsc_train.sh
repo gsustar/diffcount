@@ -6,7 +6,7 @@ LOG_DIR=" \
 	--logdir ../experiments/dummy/ \
 "
 DIFFUSION_FLAGS=" \
-	--deblur_diffusion False \
+	--deblur_diffusion True \
 	--diffusion_steps 100 \
 	--learn_sigma False \
 	--noise_schedule linear \
@@ -14,8 +14,8 @@ DIFFUSION_FLAGS=" \
 	--min_sigma 0.5 \
 	--max_sigma 20.0 \
 	--use_dct True \
-	--loss_type l1 \
-	--delta 0.0 \
+	--loss_type l2 \
+	--delta 0.01 \
 	--image_size 64 \
 "
 MODEL_FLAGS=" \
@@ -29,16 +29,17 @@ MODEL_FLAGS=" \
 	--transformer_depth 1 \
 	--spatial_transformer_attn_type softmax-xformers \
 	--use_checkpoint True \
-	--use_fp16 True \
+	--use_fp16 False \
 "
 TRAIN_FLAGS=" \
-	--batch_size 4 \
-	--lr 3e-4 \
+	--batch_size 1 \
+	--lr 2e-4 \
 	--save_interval 10000 \
 	--validation_interval 200 \
 	--num_epochs 10000 \
 	--overfit_single_batch True \
-	--dropout 0.1 \
+	--dropout 0.0 \
+	--grad_clip -1.0 \
 "
 WANDB_FLAGS=" \
 	--wandb_mode disabled \

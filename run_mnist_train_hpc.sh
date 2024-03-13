@@ -50,12 +50,11 @@ MODEL_FLAGS=" \
 TRAIN_FLAGS=" \
 	--batch_size 4 \
 	--lr 2e-4 \
-	--grad_clip 1.0 \
+	--grad_clip -1.0 \
 	--save_interval 10000 \
 	--overfit_single_batch True \
 	--validation_interval 1000 \
 	--num_epochs 10000 \
-	--warmup 0
 "
 WANDB_FLAGS=" \
 	--wandb_mode online \

@@ -52,6 +52,8 @@ TRAIN_FLAGS=" \
 	--overfit_single_batch True \
 	--validation_interval 200 \
 	--num_epochs 10000 \
+	--grad_clip -1.0 \
+	--dropout 0.0 \
 "
 WANDB_FLAGS=" \
 	--wandb_mode online \

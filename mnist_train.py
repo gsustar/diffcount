@@ -122,7 +122,6 @@ def create_argparser():
 		wandb_mode="online",
 		num_epochs=100,
 		class_cond=False,
-		warmup=0,
 		grad_clip=0.0,
 	)
 	defaults.update(model_and_diffusion_defaults())

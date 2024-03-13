@@ -7,8 +7,9 @@ from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
 from .conditioning import Conditioner, ClassEmbedder, ImageConcatEmbedder
 
-def denoise_diffusion_defaults():
+def diffusion_defaults():
 	return dict(
+		deblur_diffusion=True,
 		learn_sigma=False,
 		diffusion_steps=1000,
 		sigma_small=False,
@@ -18,10 +19,6 @@ def denoise_diffusion_defaults():
 		predict_xstart=False,
 		rescale_timesteps=False,
 		rescale_learned_sigmas=False,
-	)
-
-def deblur_diffsuion_defaults():
-	return dict(
 		blur_schedule="log",
 		min_sigma=0.5,
 		max_sigma=20.0,
@@ -61,10 +58,8 @@ def model_and_diffusion_defaults():
 		use_linear_in_transformer=False,
 		spatial_transformer_attn_type="softmax-xformers",
 		adm_in_channels=None,
-		deblur_diffusion=True,
 	)
-	res.update(denoise_diffusion_defaults())
-	res.update(deblur_diffsuion_defaults())
+	res.update(diffusion_defaults())
 	return res
 
 

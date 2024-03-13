@@ -246,7 +246,7 @@ class WandbOutputFormat(KVWriter, ImgWriter, GifWriter):
 			dtype=np.uint8
 		).transpose(0, 3, 1, 2)
 		self._wandb.log(
-			{f"media/{name}": self._wandb.Video(frames, fps=4)},
+			{f"media/{name}": self._wandb.Video(frames, fps=24)},
 			commit=True
 		)
 	
