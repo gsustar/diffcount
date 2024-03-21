@@ -1,4 +1,9 @@
-# TODO: doesn't work with fp16 training
+"""
+Code from: https://github.com/Stability-AI/generative-models/blob/main/sgm/modules/attention.py
+
+Hvala!
+"""
+
 
 import logging
 import math
@@ -505,11 +510,8 @@ class BasicTransformerBlock(nn.Module):
 				{"n_times_crossframe_attn_in_self": n_times_crossframe_attn_in_self}
 			)
 
-		# return mixed_checkpoint(self._forward, kwargs, self.parameters(), self.checkpoint)
 		if self.checkpoint:
-			# inputs = {"x": x, "context": context}
-			return checkpoint(self._forward, x, context)
-			# return checkpoint(self._forward, inputs, self.parameters(), self.checkpoint)
+			return checkpoint(self._forward, x, context, use_reentrant=False)
 		else:
 			return self._forward(**kwargs)
 
@@ -571,9 +573,7 @@ class BasicTransformerSingleLayerBlock(nn.Module):
 		self.checkpoint = checkpoint
 
 	def forward(self, x, context=None):
-		# inputs = {"x": x, "context": context}
-		# return checkpoint(self._forward, inputs, self.parameters(), self.checkpoint)
-		return checkpoint(self._forward, x, context)
+		return checkpoint(self._forward, x, context, use_reentrant=False)
 
 	def _forward(self, x, context=None):
 		x = self.attn1(self.norm1(x), context=context) + x

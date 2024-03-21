@@ -12,6 +12,7 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 
 from torch.utils.data import Dataset, DataLoader, Subset
+from . import logger
 
 
 class MNIST(Dataset):
@@ -154,8 +155,9 @@ class FSC147(Dataset):
 
 		bboxes = th.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
 		assert len(bboxes) >= self.n_examplars, f'Not enough examplars for image {self.img_names[index]}'
-		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)[:self.n_examplars, ...]											# (x_min, y_min, x_max, y_max)
-
+		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)
+		bboxes = bboxes[th.randperm(bboxes.shape[0])]
+		bboxes = bboxes[:self.n_examplars, ...]	# (x_min, y_min, x_max, y_max)
 		img, bboxes, target = self.transform(img, bboxes, target, split=self.split)
 		return target, dict(bboxes=bboxes, img=img)
 
@@ -165,6 +167,7 @@ def load_data(
 	dataset,
 	batch_size,
 	shuffle=False,
+	fraction_of_data=1.0,
 	overfit_single_batch=False,
 ):
 	"""
@@ -176,10 +179,20 @@ def load_data(
 	:param dataset: The dataset to iterate over.
 	:param batch_size: the batch size of each returned pair.
 	:param shuffle: if True, yield results in a shuffle order.
+	:param fraction_of_data: if < 1.0, only use a fraction of the dataset.
 	:param overfit_single_batch: if True, only return a single batch of data.
 	"""
+	assert 0 < fraction_of_data <= 1.0
+	if overfit_single_batch and fraction_of_data < 1.0:
+		logger.log("overfit_single_batch and fraction_of_data are both set, ignoring fraction_of_data")
+	n = None
 	if overfit_single_batch:
-		ixs = [random.randint(0, len(dataset) - 1) for _ in range(batch_size)]
+		n = batch_size
+	elif fraction_of_data < 1.0:
+		n = int(fraction_of_data * len(dataset))
+		n = max(batch_size, n)
+	if n is not None:
+		ixs = [random.randint(0, len(dataset) - 1) for _ in range(n)]
 		dataset = Subset(dataset, ixs)
 	loader = DataLoader(
 		dataset, batch_size=batch_size, shuffle=shuffle, num_workers=1, drop_last=False

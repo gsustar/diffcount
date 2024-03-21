@@ -5,7 +5,7 @@ from . import denoise_diffusion as dd
 from . import deblur_diffusion as bd
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
-from .conditioning import Conditioner, ClassEmbedder, ImageConcatEmbedder
+from .conditioning import Conditioner, ClassEmbedder, ImageConcatEmbedder, ViTExemplarEmbedder
 
 def diffusion_defaults():
 	return dict(
@@ -299,9 +299,20 @@ def create_mnist_conditioner(
 	])
 
 
-def create_fsc_conditioner():
+def create_fsc_conditioner(
+		image_size,
+		vit_size="B",
+		freeze_backbone=True,
+		is_trainable=True,
+):
 	return Conditioner([
-		ImageConcatEmbedder()
+		ImageConcatEmbedder(),
+		ViTExemplarEmbedder(
+			image_size=image_size,
+			vit_size=vit_size,
+			is_trainable=is_trainable,
+			freeze_backbone=freeze_backbone,
+		)
 	])
 
 

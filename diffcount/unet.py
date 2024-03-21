@@ -306,7 +306,7 @@ class ResBlock(TimestepBlock):
 		:return: an [N x C x ...] Tensor of outputs.
 		"""
 		if self.use_checkpoint:
-			return checkpoint(self._forward, x, emb)
+			return checkpoint(self._forward, x, emb, use_reentrant=False)
 		else:
 			return self._forward(x, emb)
 		# checkpoint(

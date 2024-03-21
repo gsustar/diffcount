@@ -62,11 +62,13 @@ def main():
 				split='train',
 				transform_kwargs=dict(
 					img_size=args.image_size
-				)
+				),
+				n_examplars=args.n_exemplars,
 			),
 			batch_size=args.batch_size,
 			shuffle=True,
 			overfit_single_batch=args.overfit_single_batch,
+			fraction_of_data=args.fraction_of_data,
 		)
 		val_data = load_data(
 			dataset=FSC147(
@@ -75,14 +77,18 @@ def main():
 				split='val',
 				transform_kwargs=dict(
 					img_size=args.image_size
-				)
+				),
+				n_examplars=args.n_exemplars,
 			),
 			batch_size=args.batch_size,
 			shuffle=False,
 		) if not args.overfit_single_batch else train_data
 
 		logger.log("creating conditioner...")
-		conditioner = create_fsc_conditioner()
+		conditioner = create_fsc_conditioner(
+			image_size=args.image_size,
+			is_trainable=True,
+		).to(dev)
 
 		if isinstance(diffusion, DeblurDiffusion):
 			diffusion.set_init_sample_set(train_data)
@@ -134,6 +140,8 @@ def create_argparser():
 		wandb_mode="online",
 		num_epochs=100,
 		grad_clip=0.0,
+		n_exemplars=3,
+		fraction_of_data=1.0,
 	)
 	defaults.update(model_and_diffusion_defaults())
 	parser = argparse.ArgumentParser()
