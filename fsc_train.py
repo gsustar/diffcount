@@ -1,13 +1,10 @@
 import argparse
 import datetime
-import numpy as np
 import pprint
 
 import os.path as osp
 import torch as th
-import torch.nn.functional as F
 
-# from diffcount import dist_util, logger
 from diffcount import logger
 from diffcount.datasets import FSC147, load_data
 from diffcount.resample import create_named_schedule_sampler

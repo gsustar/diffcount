@@ -1,27 +1,13 @@
-import copy
-import functools
-import os
-
 import blobfile as bf
 import torch as th
-import torch.nn as nn
 import numpy as np
-# import torch.distributed as dist
-# from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 
-# from . import dist_util, logger
 from . import logger
-# from .fp16_util import MixedPrecisionTrainer
 from .resample import LossAwareSampler, UniformSampler
 from .plot_utils import draw_bboxes, draw_cls
 from .ema import ExponentialMovingAverage
-from .conditioning import Conditioner
 
-# For ImageNet experiments, this was a good default value.
-# We found that the lg_loss_scale quickly climbed to
-# 20-21 within the first ~1K steps of training.
-# INITIAL_LOG_LOSS_SCALE = 20.0
 
 class TrainLoop:
 	def __init__(
@@ -69,7 +55,7 @@ class TrainLoop:
 		# self.resume_step = 0
 		# self.resume_epoch = 0
 
-		self.conditioner = conditioner or Conditioner([])
+		self.conditioner = conditioner
 		self.opt = self.configure_optimizer()
 		self.scaler = th.cuda.amp.GradScaler(enabled=self.use_fp16)
 		self.scheduler = None

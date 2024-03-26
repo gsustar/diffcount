@@ -19,11 +19,11 @@ class MNIST(Dataset):
 
 	def __init__(
 		self, 
-		root, 
+		datadir, 
 		split='train'
 	):
 		self.dataset = thdata.MNIST(
-			root=root,
+			root=datadir,
 			train=True if split == 'train' else False,
 			download=True,
 			transform=transforms.Compose([
@@ -42,15 +42,15 @@ class MNIST(Dataset):
 
 class FSC147(Dataset):
 	"""
-	:param root: root directory of dataset.
+	:param datadir: datadir directory of dataset.
 	:param targetdir: Name of the directory containing the GT maps.
 	:param split: 'train', 'val' or 'test'.
-	:param n_examplars: Number of examplars
+	:param n_exemplars: Number of examplars
 	:param target_transform: Optional transforms to be applied to the density map.
 
-	Make sure the root directory has the following structure:
+	Make sure the datadir directory has the following structure:
 
-   root
+   datadir
 	├── images_384_VarV2
 	│       ├─ 2.jpg
 	│       ├─ 3.jpg
@@ -69,27 +69,27 @@ class FSC147(Dataset):
 
 	def __init__(
 			self,
-			root: str,
+			datadir: str,
 			targetdir: str,
 			split: Literal['train', 'val', 'test'] = 'train',
-			n_examplars: int = 3,
+			n_exemplars: int = 3,
 			transform_kwargs: dict = dict(),
 	):
-		self.root = root
+		self.datadir = datadir
 		self.targetdir = targetdir
 		self.split = split
-		self.n_examplars = n_examplars
+		self.n_exemplars = n_exemplars
 
-		self.img_size = transform_kwargs.pop("img_size", 256)
+		self.image_size = transform_kwargs.pop("image_size", 256)
 		self.hflip_p = transform_kwargs.pop("hflip_p", 0.5)
 		self.cj_p = transform_kwargs.pop("cj_p", 0.8)
 
 		self.img_names = None
-		with open(os.path.join(self.root, 'Train_Test_Val_FSC_147.json'), 'rb') as f:
+		with open(os.path.join(self.datadir, 'Train_Test_Val_FSC_147.json'), 'rb') as f:
 			self.img_names = json.load(f)[self.split]
 
 		self.annotations = None
-		with open(os.path.join(self.root, 'annotation_FSC147_384.json'), 'rb') as f:
+		with open(os.path.join(self.datadir, 'annotation_FSC147_384.json'), 'rb') as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
 
@@ -100,11 +100,11 @@ class FSC147(Dataset):
 
 		# Resize
 		old_h, old_w = img.shape[-2:]
-		img = F.resize(img, (self.img_size, self.img_size), antialias=True)
+		img = F.resize(img, (self.image_size, self.image_size), antialias=True)
 		# Preferably create density maps with the same size as the input images and avoid resizing at this stage
 		if target.shape[-2:] != img.shape[-2:]:
 			original_sum = target.sum()
-			target = F.resize(target, (self.img_size, self.img_size), antialias=True)
+			target = F.resize(target, (self.image_size, self.image_size), antialias=True)
 			target = target / target.sum() * original_sum
 
 		new_h, new_w = img.shape[-2:]
@@ -117,7 +117,7 @@ class FSC147(Dataset):
 			if th.rand(1) < self.hflip_p:
 				img = F.hflip(img)
 				target = F.hflip(target)
-				bboxes[:, [0, 2]] = self.img_size - bboxes[:, [2, 0]]
+				bboxes[:, [0, 2]] = self.image_size - bboxes[:, [2, 0]]
 
 			# RandomColorJitter
 			if th.rand(1) < self.cj_p:
@@ -139,7 +139,7 @@ class FSC147(Dataset):
 
 		img = Image.open(
 			os.path.join(
-				self.root,
+				self.datadir,
 				'images_384_VarV2',
 				self.img_names[index]
 			)
@@ -147,17 +147,17 @@ class FSC147(Dataset):
 
 		target = np.load(
 			os.path.join(
-				self.root,
+				self.datadir,
 				self.targetdir,
 				os.path.splitext(self.img_names[index])[0] + '.npy'
 			)
 		)
 
 		bboxes = th.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
-		assert len(bboxes) >= self.n_examplars, f'Not enough examplars for image {self.img_names[index]}'
+		assert len(bboxes) >= self.n_exemplars, f'Not enough examplars for image {self.img_names[index]}'
 		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)
 		bboxes = bboxes[th.randperm(bboxes.shape[0])]
-		bboxes = bboxes[:self.n_examplars, ...]	# (x_min, y_min, x_max, y_max)
+		bboxes = bboxes[:self.n_exemplars, ...]	# (x_min, y_min, x_max, y_max)
 		img, bboxes, target = self.transform(img, bboxes, target, split=self.split)
 		return target, dict(bboxes=bboxes, img=img)
 

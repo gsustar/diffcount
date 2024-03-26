@@ -1,0 +1,88 @@
+name: exp1
+seed: 42
+
+diffusion:
+  schedule_sampler: "uniform"
+  type: "Denoise" # or Deblur
+  params:
+    diffusion_steps: 250
+    noise_schedule: linear
+    learn_sigma: False
+    sigma_small: False
+    use_kl: False
+    predict_xstart: False
+    rescale_timesteps: False
+    rescale_learned_sigmas: False
+    timestep_respacing: ""
+
+model:
+  type: "UNet" # or DiT
+  params:
+    image_size: 64
+    in_channels: 4
+    model_channels: 64
+    out_channels: 1
+    num_res_blocks: 2
+    attention_resolutions: [32, 16, 8]
+    dropout: 0.0
+    channel_mult: [1, 2, 3, 4]
+    conv_resample: True
+    dims: 2
+    num_classes: null
+    use_checkpoint: True
+    num_heads: -1
+    num_head_channels: 64
+    num_heads_upsample: -1
+    use_scale_shift_norm: False
+    resblock_updown: False
+    transformer_depth: 1
+    context_dim: 1024
+    disable_self_attentions: null
+    num_attention_blocks: null
+    disable_middle_self_attn: False
+    disable_middle_transformer: False
+    use_linear_in_transformer: False
+    spatial_transformer_attn_type: softmax-xformers
+    adm_in_channels: null
+
+conditioner:
+  type: "FSC147"
+  params:
+    image_size: 64
+    vit_size: "B"
+    freeze_backbone: True
+    is_trainable: False
+
+data:
+  dataset:
+    name: "FSC147"
+    params:
+      datadir: ../FSC147_384_V2/
+      targetdir: densitymaps/sig_0.5/size_256/
+      n_exemplars: 3
+      image_size: 64
+      hflip_p: 0.5
+      cj_p: 0.8
+
+  dataloader:
+    params:
+      batch_size: 4
+      fraction_of_data: 1.0
+      overfit_single_batch: True
+
+train:
+  lr: 2.e-4
+  num_epochs: 10000
+  dropout: 0.0
+  grad_clip: -1.0
+  use_fp16: False
+  ema_rate: 0.9999
+  validation_interval: 200
+  resume_checkpoint: null
+  weight_decay: 0.0
+
+log:
+  logdir: ../experiments/dummy/
+  wandb_mode: disabled
+  log_interval: 10
+  save_interval: 10000

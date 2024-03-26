@@ -1,69 +1,98 @@
-import argparse
-import inspect
-
 from . import denoise_diffusion as dd
 from . import deblur_diffusion as bd
+from .datasets import FSC147, MNIST, load_data
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
 from .conditioning import Conditioner, ClassEmbedder, ImageConcatEmbedder, ViTExemplarEmbedder
 
-def diffusion_defaults():
-	return dict(
-		deblur_diffusion=True,
-		learn_sigma=False,
-		diffusion_steps=1000,
-		sigma_small=False,
-		noise_schedule="linear",
-		timestep_respacing="",
-		use_kl=False,
-		predict_xstart=False,
-		rescale_timesteps=False,
-		rescale_learned_sigmas=False,
-		blur_schedule="log",
-		min_sigma=0.5,
-		max_sigma=20.0,
-		image_size=256,
-		loss_type="l1",
-		use_dct=False,
-		delta=0.01,
-	)
-
-def model_and_diffusion_defaults():
-	"""
- 	Defaults for image training.
- 	"""
-	res = dict(
-		in_channels=1,
-		model_channels=32,
-		out_channels=1,
-		num_res_blocks=2,
-		attention_resolutions="",
-		dropout=0.0,
-		channel_mult="1,2,2",
-		conv_resample=True,
-		dims=2,
-		num_classes=None,
-		use_checkpoint=False,
-		num_heads=1,
-		num_head_channels=64,
-		num_heads_upsample=-1,
-		use_scale_shift_norm=True,
-		resblock_updown=False,
-		transformer_depth=1,
-		context_dim=None,
-		disable_self_attentions = None,
-		num_attention_blocks = None,
-		disable_middle_self_attn = False,
-		disable_middle_transformer = False,
-		use_linear_in_transformer=False,
-		spatial_transformer_attn_type="softmax-xformers",
-		adm_in_channels=None,
-	)
-	res.update(diffusion_defaults())
-	return res
-
 
 def create_model_and_diffusion(
+	model_config, 
+	diffusion_config
+):	
+	learn_sigma = False
+	if diffusion_config.type == "Deblur":
+		diffusion = create_deblur_diffusion(
+			**vars(diffusion_config.params)
+		)
+	elif diffusion_config.type == "Denoise":
+		learn_sigma = diffusion_config.params.learn_sigma
+		diffusion = create_denoise_diffusion(
+			**vars(diffusion_config.params),
+		)
+	else:
+		raise ValueError(f"Unsupported diffusion type: {diffusion_config.type}")
+
+	if model_config.type == "UNet":
+		model = create_unet_model(
+			learn_sigma=learn_sigma,
+			**vars(model_config.params)
+		)
+	elif model_config.type == "DiT":
+		model = create_dit_model() # todo
+	else:
+		raise ValueError(f"Unsupported model type: {model_config.type}")
+	
+	return model, diffusion
+
+
+def create_data_and_conditioner(
+	data_config,
+	conditioner_config,
+):
+	if data_config.dataset.name == "FSC147":
+		train_dataset, val_dataset = (
+			FSC147(
+				datadir=data_config.dataset.params.datadir,
+				targetdir=data_config.dataset.params.targetdir,
+				n_exemplars=data_config.dataset.params.n_exemplars,
+				transform_kwargs=dict(
+					image_size=data_config.dataset.params.image_size,
+					hflip_p=data_config.dataset.params.hflip_p,
+					cj_p=data_config.dataset.params.cj_p
+				),
+				split=split
+			) for split in ['train', 'val']
+		)
+		create_conditioner_fn = create_fsc147_conditioner
+	elif data_config.dataset.name == "MNIST":
+		train_dataset, val_dataset = (
+			MNIST(
+				datadir=data_config.dataset.params.datadir,
+				split=split,
+			) for split in ['train', 'val']
+		)
+		create_conditioner_fn = create_mnist_conditioner
+	else:
+		raise ValueError(f"Unknown dataset: {data_config.dataset}")
+	
+	if conditioner_config is not None:
+		conditioner = create_conditioner_fn(
+			**vars(conditioner_config.params)
+		)
+	else:
+		conditioner = create_empty_conditioner()
+
+	train_data = load_data(
+		dataset=train_dataset,
+		batch_size=data_config.dataloader.params.batch_size,
+		shuffle=True,
+		overfit_single_batch=data_config.dataloader.params.overfit_single_batch,
+		fraction_of_data=data_config.dataloader.params.fraction_of_data,
+	)
+
+	val_data = load_data(
+		dataset=val_dataset,
+		batch_size=data_config.dataloader.params.batch_size,
+		shuffle=False,
+	) if not data_config.dataloader.params.overfit_single_batch else train_data
+
+	return train_data, val_data, conditioner
+
+
+
+def create_unet_model(
+	image_size,
 	in_channels,
 	model_channels,
 	out_channels,
@@ -89,122 +118,37 @@ def create_model_and_diffusion(
 	use_linear_in_transformer,
 	spatial_transformer_attn_type,
 	adm_in_channels,
-	deblur_diffusion,
-	blur_schedule,
-	min_sigma,
-	max_sigma,
-	image_size,
-	loss_type,
-	use_dct,
-	delta,
 	learn_sigma,
-	diffusion_steps,
-	noise_schedule,
-	sigma_small,
-	use_kl,
-	predict_xstart,
-	rescale_timesteps,
-	rescale_learned_sigmas,
-	timestep_respacing,
 ):
-	model = create_model(
-		in_channels,
-		model_channels,
-		out_channels,
-		num_res_blocks,
-		attention_resolutions,
-		dropout,
-		channel_mult,
-		conv_resample,
-		dims,
-		num_classes,
-		use_checkpoint,
-		num_heads,
-		num_head_channels,
-		num_heads_upsample,
-		use_scale_shift_norm,
-		resblock_updown,
-		transformer_depth,
-		context_dim,
-		disable_self_attentions,
-		num_attention_blocks,
-		disable_middle_self_attn,
-		disable_middle_transformer,
-		use_linear_in_transformer,
-		spatial_transformer_attn_type,
-		adm_in_channels,
-		learn_sigma=learn_sigma,
-	)
-	if deblur_diffusion:
-		diffusion = create_deblur_diffusion(
-			steps=diffusion_steps,
-			blur_schedule=blur_schedule,
-			min_sigma=min_sigma,
-			max_sigma=max_sigma,
-			image_size=image_size,
-			loss_type=loss_type,
-			use_dct=use_dct,
-			delta=delta,
-		)
-		return model, diffusion
-	
-	diffusion = create_denoise_diffusion(
-		steps=diffusion_steps,
-		learn_sigma=learn_sigma,
-		sigma_small=sigma_small,
-		noise_schedule=noise_schedule,
-		use_kl=use_kl,
-		predict_xstart=predict_xstart,
-		rescale_timesteps=rescale_timesteps,
-		rescale_learned_sigmas=rescale_learned_sigmas,
-		timestep_respacing=timestep_respacing,
-	)
-	return model, diffusion
+	if channel_mult is None:
+		if image_size == 512:
+			channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
+		elif image_size == 256:
+			channel_mult = (1, 1, 2, 2, 4, 4)
+		elif image_size == 128:
+			channel_mult = (1, 1, 2, 3, 4)
+		elif image_size == 64:
+			channel_mult = (1, 2, 3, 4)
+		else:
+			raise ValueError(f"unsupported image size: {image_size}")
 
 
-def create_model(
-	in_channels,
-	model_channels,
-	out_channels,
-	num_res_blocks,
-	attention_resolutions="",
-	dropout=0.0,
-	channel_mult="1,2,3,4",
-	conv_resample=True,
-	dims=2,
-	num_classes=None,
-	use_checkpoint=False,
-	num_heads=-1,
-	num_head_channels=-1,
-	num_heads_upsample=-1,
-	use_scale_shift_norm=False,
-	resblock_updown=False,
-	transformer_depth=1,
-	context_dim=None,
-	disable_self_attentions=None,
-	num_attention_blocks=None,
-	disable_middle_self_attn=False,
-	disable_middle_transformer=False,
-	use_linear_in_transformer=False,
-	spatial_transformer_attn_type="softmax",
-	adm_in_channels=None,
-	learn_sigma=False,
-):
-	channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
-	if attention_resolutions == "":
-		attention_res = tuple()
-	else:
-		attention_res = tuple(int(res) for res in attention_resolutions.split(","))
+	attention_ds = []
+	for res in attention_resolutions:
+		attention_ds.append(image_size // int(res))
 	
-	context_dim = int(context_dim) if context_dim is not None else None
-	adm_in_channels = int(adm_in_channels) if adm_in_channels is not None else None
+	if context_dim is not None:
+		context_dim = int(context_dim)
+
+	if adm_in_channels is not None:
+		adm_in_channels = int(adm_in_channels)
 
 	return UNetModel(
 		in_channels=in_channels,
 		model_channels=model_channels,
 		out_channels=(out_channels if not learn_sigma else 2 * out_channels),
 		num_res_blocks=num_res_blocks,
-		attention_resolutions=attention_res,
+		attention_resolutions=tuple(attention_ds),
 		dropout=dropout,
 		channel_mult=channel_mult,
 		conv_resample=conv_resample,
@@ -228,66 +172,18 @@ def create_model(
 	)
 
 
-# def create_model(
-# 	image_size,
-# 	num_channels,
-# 	num_res_blocks,
-# 	channel_mult="",
-# 	learn_sigma=False,
-# 	class_cond=False,
-# 	use_checkpoint=False,
-# 	attention_resolutions="16",
-# 	num_heads=1,
-# 	num_head_channels=-1,
-# 	num_heads_upsample=-1,
-# 	use_scale_shift_norm=False,
-# 	dropout=0,
-# 	resblock_updown=False,
-# 	use_fp16=False,
-# 	use_new_attention_order=False,
-# ):
-# 	if channel_mult == "":
-# 		if image_size == 512:
-# 			channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
-# 		elif image_size == 256:
-# 			channel_mult = (1, 1, 2, 2, 4, 4)
-# 		elif image_size == 128:
-# 			channel_mult = (1, 1, 2, 3, 4)
-# 		elif image_size == 64:
-# 			channel_mult = (1, 2, 3, 4)
-# 		else:
-# 			raise ValueError(f"unsupported image size: {image_size}")
-# 	else:
-# 		channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
+def create_dit_model():
+	pass
 
-# 	attention_ds = []
-# 	for res in attention_resolutions.split(","):
-# 		attention_ds.append(image_size // int(res))
 
-# 	return UNetModel(
-# 		image_size=image_size,
-# 		in_channels=3,
-# 		model_channels=num_channels,
-# 		out_channels=(3 if not learn_sigma else 6),
-# 		num_res_blocks=num_res_blocks,
-# 		attention_resolutions=tuple(attention_ds),
-# 		dropout=dropout,
-# 		channel_mult=channel_mult,
-# 		num_classes=(NUM_CLASSES if class_cond else None),
-# 		use_checkpoint=use_checkpoint,
-# 		use_fp16=use_fp16,
-# 		num_heads=num_heads,
-# 		num_head_channels=num_head_channels,
-# 		num_heads_upsample=num_heads_upsample,
-# 		use_scale_shift_norm=use_scale_shift_norm,
-# 		resblock_updown=resblock_updown,
-# 		use_new_attention_order=use_new_attention_order,
-# 	)
+def create_empty_conditioner():
+	return Conditioner([])
+
 
 def create_mnist_conditioner(
 	embed_dim,
-	is_trainable=True,
-	add_sequence_dim=True,
+	is_trainable,
+	add_sequence_dim,
 ):
 	return Conditioner([
 		ClassEmbedder(
@@ -299,11 +195,11 @@ def create_mnist_conditioner(
 	])
 
 
-def create_fsc_conditioner(
-		image_size,
-		vit_size="B",
-		freeze_backbone=True,
-		is_trainable=True,
+def create_fsc147_conditioner(
+	image_size,
+	vit_size,
+	freeze_backbone,
+	is_trainable,
 ):
 	return Conditioner([
 		ImageConcatEmbedder(),
@@ -317,17 +213,16 @@ def create_fsc_conditioner(
 
 
 def create_deblur_diffusion(
-	*,
-	steps=1000,
-	blur_schedule="log",
-	min_sigma=0.5,
-	max_sigma=20.0,
-	image_size=256,
-	loss_type="l1",
-	use_dct=True,
-	delta=0.01,
+	diffusion_steps,
+	blur_schedule,
+	min_sigma,
+	max_sigma,
+	image_size,
+	loss_type,
+	use_dct,
+	delta,
 ):	
-	blur_schedule = bd.get_named_blur_schedule(blur_schedule, steps, min_sigma, max_sigma)
+	blur_schedule = bd.get_named_blur_schedule(blur_schedule, diffusion_steps, min_sigma, max_sigma)
 
 	#TODO Add support for spaced diffusion
 	return bd.DeblurDiffusion(
@@ -340,18 +235,17 @@ def create_deblur_diffusion(
 
 
 def create_denoise_diffusion(
-	*,
-	steps=1000,
-	learn_sigma=False,
-	sigma_small=False,
-	noise_schedule="linear",
-	use_kl=False,
-	predict_xstart=False,
-	rescale_timesteps=False,
-	rescale_learned_sigmas=False,
-	timestep_respacing="",
+	diffusion_steps,
+	learn_sigma,
+	sigma_small,
+	noise_schedule,
+	use_kl,
+	predict_xstart,
+	rescale_timesteps,
+	rescale_learned_sigmas,
+	timestep_respacing,
 ):
-	betas = dd.get_named_beta_schedule(noise_schedule, steps)
+	betas = dd.get_named_beta_schedule(noise_schedule, diffusion_steps)
 	if use_kl:
 		loss_type = dd.LossType.RESCALED_KL
 	elif rescale_learned_sigmas:
@@ -359,9 +253,9 @@ def create_denoise_diffusion(
 	else:
 		loss_type = dd.LossType.MSE
 	if not timestep_respacing:
-		timestep_respacing = [steps]
+		timestep_respacing = [diffusion_steps]
 	return SpacedDiffusion(
-		use_timesteps=space_timesteps(steps, timestep_respacing),
+		use_timesteps=space_timesteps(diffusion_steps, timestep_respacing),
 		betas=betas,
 		model_mean_type=(
 			dd.ModelMeanType.EPSILON if not predict_xstart else dd.ModelMeanType.START_X
@@ -378,31 +272,3 @@ def create_denoise_diffusion(
 		loss_type=loss_type,
 		rescale_timesteps=rescale_timesteps,
 	)
-
-
-def add_dict_to_argparser(parser, default_dict):
-	for k, v in default_dict.items():
-		v_type = type(v)
-		if v is None:
-			v_type = str
-		elif isinstance(v, bool):
-			v_type = str2bool
-		parser.add_argument(f"--{k}", default=v, type=v_type)
-
-
-def args_to_dict(args, keys):
-	return {k: getattr(args, k) for k in keys}
-
-
-def str2bool(v):
-	"""
-	https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
-	"""
-	if isinstance(v, bool):
-		return v
-	if v.lower() in ("yes", "true", "t", "y", "1"):
-		return True
-	elif v.lower() in ("no", "false", "f", "n", "0"):
-		return False
-	else:
-		raise argparse.ArgumentTypeError("boolean value expected")
