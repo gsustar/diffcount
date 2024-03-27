@@ -60,9 +60,10 @@ data:
       datadir: ../FSC147_384_V2/
       targetdir: densitymaps/sig_0.5/size_256/
       n_exemplars: 3
-      image_size: 64
-      hflip_p: 0.5
-      cj_p: 0.8
+      transform_kwargs:
+        image_size: 64
+        hflip_p: 0.5
+        cj_p: 0.0
 
   dataloader:
     params:
@@ -71,7 +72,7 @@ data:
       overfit_single_batch: True
 
 train:
-  lr: 2.e-4
+  lr: 1.e-5
   num_epochs: 10000
   dropout: 0.0
   grad_clip: -1.0

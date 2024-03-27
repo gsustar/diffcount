@@ -41,16 +41,11 @@ def create_data_and_conditioner(
 	conditioner_config,
 ):
 	if data_config.dataset.name == "FSC147":
+		data_config.dataset.params.transform_kwargs = \
+			vars(data_config.dataset.params.transform_kwargs)
 		train_dataset, val_dataset = (
 			FSC147(
-				datadir=data_config.dataset.params.datadir,
-				targetdir=data_config.dataset.params.targetdir,
-				n_exemplars=data_config.dataset.params.n_exemplars,
-				transform_kwargs=dict(
-					image_size=data_config.dataset.params.image_size,
-					hflip_p=data_config.dataset.params.hflip_p,
-					cj_p=data_config.dataset.params.cj_p
-				),
+				**vars(data_config.dataset.params),
 				split=split
 			) for split in ['train', 'val']
 		)
@@ -58,7 +53,7 @@ def create_data_and_conditioner(
 	elif data_config.dataset.name == "MNIST":
 		train_dataset, val_dataset = (
 			MNIST(
-				datadir=data_config.dataset.params.datadir,
+				**vars(data_config.dataset.params),
 				split=split,
 			) for split in ['train', 'val']
 		)
@@ -88,7 +83,6 @@ def create_data_and_conditioner(
 	) if not data_config.dataloader.params.overfit_single_batch else train_data
 
 	return train_data, val_data, conditioner
-
 
 
 def create_unet_model(

@@ -55,7 +55,7 @@ class DeblurDiffusion(BaseDiffusion):
 	def set_init_sample_set(self, init_sample_set):
 		self.init_sample_set = init_sample_set
 
-	def get_init_sample(self, shape, device):
+	def get_init_sample(self, shape, device, noise=None):
 		assert self.init_sample_set is not None
 		init_sample = next(iter(self.init_sample_set))[0].to(device)
 		init_sample = self.q_sample(init_sample,
@@ -83,70 +83,8 @@ class DeblurDiffusion(BaseDiffusion):
 	def p_sample(self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None):
 		u_mean = model(x, t, **model_kwargs) + x
 		noise = th.randn_like(x)
-		return u_mean + noise*self.delta_sample
 
-	def p_sample_loop(
-		self,
-		model,
-		shape,
-		noise=None,
-		clip_denoised=True,
-		denoised_fn=None,
-		model_kwargs=None,
-		device=None,
-		progress=False,
-	):
-		final = None
-		for sample in self.p_sample_loop_progressive(
-			model,
-			shape,
-			noise=noise,
-			clip_denoised=clip_denoised,
-			denoised_fn=denoised_fn,
-			model_kwargs=model_kwargs,
-			device=device,
-			progress=progress,
-		):
-			final = sample
-		return final
-
-	def p_sample_loop_progressive(
-		self,
-		model,
-		shape,
-		noise=None,
-		clip_denoised=True,
-		denoised_fn=None,
-		model_kwargs=None,
-		device=None,
-		progress=False,
-	):
-		if device is None:
-			device = next(model.parameters()).device
-		assert isinstance(shape, (tuple, list))
-
-		img = self.get_init_sample(shape, device)
-		indices = list(range(self.num_timesteps))[::-1]
-
-		if progress:
-			# Lazy import so that we don't depend on tqdm.
-			from tqdm.auto import tqdm
-
-			indices = tqdm(indices)
-
-		for i in indices:
-			t = th.tensor([i] * shape[0], device=device)
-			with th.no_grad():
-				out = self.p_sample(
-					model,
-					img,
-					t,
-					clip_denoised=clip_denoised,
-					denoised_fn=denoised_fn,
-					model_kwargs=model_kwargs,
-				)
-				yield out
-				img = out
+		return {"sample": u_mean + noise*self.delta_sample}
 	
 	def training_losses(self, model, x_start, t, model_kwargs=None):
 		x_t = self.q_sample(x_start, t)

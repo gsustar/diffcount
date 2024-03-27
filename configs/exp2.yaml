@@ -1,11 +1,11 @@
 name: exp2
-seed: 42
+seed: 42 # todo
 
 diffusion:
   schedule_sampler: "uniform"
   type: "Deblur" # or Deblur
   params:
-    diffusion_steps: 1000
+    diffusion_steps: 100
     blur_schedule: "log"
     min_sigma: 0.5
     max_sigma: 20.0
