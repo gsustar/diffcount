@@ -108,8 +108,10 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 	def __init__(
 		self, 
 		image_size,
+		out_channels=256,
 		vit_size="B",
 		freeze_backbone=True,
+		remove_sequence_dim=False,
 		is_trainable=False
 	):
 		super().__init__(
@@ -117,6 +119,7 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 			is_trainable=is_trainable
 		)
 		self.image_size = image_size
+		self.remove_sequence_dim = remove_sequence_dim
 		if vit_size == "B":
 			embed_dim, depth, num_heads, dp = 768, 12, 12, 0.1
 			# 2, 5, 8 11 for global attention
@@ -176,7 +179,7 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 			sampling_ratio=0,
 			pooler_type="ROIAlignV2",
 		)
-		self.fc1 = nn.Linear(256 * 7**2, 1024) # vit_out_channels * roi_output_size^2
+		self.fc1 = nn.Linear(256 * 7**2, out_channels) # vit_out_channels * roi_output_size^2
 
 		checkpointer = DetectionCheckpointer(self)
 		checkpointer.load(VITDET_PRETRAINED_MODELS[vit_size])
@@ -198,5 +201,9 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		x = x.flatten(start_dim=1)
 		x = x.reshape(batch_size, n_exemplars, x.shape[1])
 		x = self.fc1(x)
+
+		# TODO experiment with adding all three exemplars
+		if self.remove_sequence_dim:
+			x = x.reshape(batch_size, -1)
 		
 		return x

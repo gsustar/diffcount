@@ -1,5 +1,18 @@
-name: exp1
-seed: 42
+name: exp3
+seed: 42 # todo
+
+# diffusion:
+#   schedule_sampler: "uniform"
+#   type: "Deblur" # or Deblur
+#   params:
+#     diffusion_steps: 150
+#     blur_schedule: "log"
+#     min_sigma: 0.5
+#     max_sigma: 20.0
+#     image_size: 28
+#     loss_type: "l1"
+#     use_dct: False
+#     delta: 0.01
 
 diffusion:
   schedule_sampler: "uniform"
@@ -16,33 +29,13 @@ diffusion:
     timestep_respacing: ""
 
 model:
-  type: "UNet" # or DiT
+  type: "DiT" # or DiT
   params:
-    image_size: 64
+    dit_size: "DiT-S/2"
+    input_size: 64
     in_channels: 4
-    model_channels: 64
     out_channels: 1
-    num_res_blocks: 2
-    attention_resolutions: [32, 16, 8]
-    dropout: 0.0
-    channel_mult: [1, 2, 3, 4]
-    conv_resample: True
-    dims: 2
-    num_classes: 'sequential'
-    use_checkpoint: True
-    num_heads: -1
-    num_head_channels: 64
-    num_heads_upsample: -1
-    use_scale_shift_norm: True
-    resblock_updown: False
-    transformer_depth: 1
     context_dim: null
-    disable_self_attentions: null
-    num_attention_blocks: null
-    disable_middle_self_attn: False
-    disable_middle_transformer: False
-    use_linear_in_transformer: False
-    spatial_transformer_attn_type: softmax-xformers
     adm_in_channels: 768
 
 conditioner:
@@ -74,7 +67,7 @@ data:
       overfit_single_batch: True
 
 train:
-  lr: 1.e-5
+  lr: 2.e-4
   num_epochs: 10000
   dropout: 0.0
   grad_clip: -1.0

@@ -21,7 +21,6 @@ def main():
 		args = parse_args()
 		config = parse_config(args.config)
 		now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-		logger.log(f"config: {pprint.pformat(config)}")
 
 		config.log.logdir = osp.join(
 			config.log.logdir,
@@ -42,6 +41,7 @@ def main():
 			)
 		)
 
+		logger.log(pprint.pformat(config))
 		logger.log("creating model and diffusion...")
 		model, diffusion = create_model_and_diffusion(
 			config.model, 

@@ -3,6 +3,7 @@ from . import deblur_diffusion as bd
 from .datasets import FSC147, MNIST, load_data
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
+from .dit import DiT_models
 from .conditioning import Conditioner, ClassEmbedder, ImageConcatEmbedder, ViTExemplarEmbedder
 
 
@@ -12,6 +13,7 @@ def create_model_and_diffusion(
 ):	
 	learn_sigma = False
 	if diffusion_config.type == "Deblur":
+		assert not hasattr(diffusion_config.params, "learn_sigma"), "learn_sigma is not supported for Deblur diffusion."
 		diffusion = create_deblur_diffusion(
 			**vars(diffusion_config.params)
 		)
@@ -29,7 +31,10 @@ def create_model_and_diffusion(
 			**vars(model_config.params)
 		)
 	elif model_config.type == "DiT":
-		model = create_dit_model() # todo
+		model = create_dit_model(
+			learn_sigma=learn_sigma,
+			**vars(model_config.params),
+		)
 	else:
 		raise ValueError(f"Unsupported model type: {model_config.type}")
 	
@@ -166,8 +171,24 @@ def create_unet_model(
 	)
 
 
-def create_dit_model():
-	pass
+def create_dit_model(
+	dit_size,
+	input_size,
+	in_channels,
+	out_channels,
+	context_dim,
+	adm_in_channels,
+	learn_sigma,
+):
+	model = DiT_models[dit_size](
+        input_size=input_size,
+		in_channels=in_channels,
+		out_channels=out_channels,
+		context_dim=context_dim,
+		adm_in_channels=adm_in_channels,
+		learn_sigma=learn_sigma,
+    )
+	return model
 
 
 def create_empty_conditioner():
@@ -191,16 +212,20 @@ def create_mnist_conditioner(
 
 def create_fsc147_conditioner(
 	image_size,
+	out_channels,
 	vit_size,
 	freeze_backbone,
+	remove_sequence_dim,
 	is_trainable,
 ):
 	return Conditioner([
 		ImageConcatEmbedder(),
 		ViTExemplarEmbedder(
 			image_size=image_size,
+			out_channels=out_channels,
 			vit_size=vit_size,
 			is_trainable=is_trainable,
+			remove_sequence_dim=remove_sequence_dim,
 			freeze_backbone=freeze_backbone,
 		)
 	])
