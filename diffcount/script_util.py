@@ -46,8 +46,6 @@ def create_data_and_conditioner(
 	conditioner_config,
 ):
 	if data_config.dataset.name == "FSC147":
-		data_config.dataset.params.transform_kwargs = \
-			vars(data_config.dataset.params.transform_kwargs)
 		train_dataset, val_dataset = (
 			FSC147(
 				**vars(data_config.dataset.params),
@@ -78,7 +76,6 @@ def create_data_and_conditioner(
 		batch_size=data_config.dataloader.params.batch_size,
 		shuffle=True,
 		overfit_single_batch=data_config.dataloader.params.overfit_single_batch,
-		fraction_of_data=data_config.dataloader.params.fraction_of_data,
 	)
 
 	val_data = load_data(

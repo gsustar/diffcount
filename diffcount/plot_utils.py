@@ -26,6 +26,7 @@ def _maybe_to_plotting_range(x):
 	)
 
 def to_pil_image(tensor, **grid_kwargs):
+	# tensor must be in range [-1, 1] or already in [0, 255]
 	grid_defaults = dict(
 		nrow=int(
 			np.sqrt(tensor.shape[0])

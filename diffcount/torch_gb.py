@@ -21,7 +21,6 @@ def _gaussian_kernel2d(kernel_size, sigma, dtype, device):
 def _gaussian_blur(x, kernel_size, sigma, mode, value):
 	kernel = _gaussian_kernel2d(kernel_size, sigma, dtype=x.dtype, device=x.device)
 	kernel = kernel.expand(x.shape[-3], 1, kernel.shape[0], kernel.shape[1])
-	# padding = (left, right, top, bottom)
 	padding = [kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size // 2]
 	x = F.pad(x, padding, mode=mode, value=value)
 	x = F.conv2d(x, kernel, groups=x.shape[-3])

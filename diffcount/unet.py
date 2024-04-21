@@ -15,7 +15,7 @@ from .attention import SpatialTransformer
 from .nn import (avg_pool_nd, conv_nd, linear,
 				timestep_embedding, zero_module, exists)
 
-# TODO switch to logger
+# TODO properly init weights of UNetModel
 # logpy = logging.getLogger(__name__)
 
 

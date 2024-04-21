@@ -202,7 +202,6 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		x = x.reshape(batch_size, n_exemplars, x.shape[1])
 		x = self.fc1(x)
 
-		# TODO experiment with adding all three exemplars
 		if self.remove_sequence_dim:
 			x = x.reshape(batch_size, -1)
 		

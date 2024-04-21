@@ -60,17 +60,17 @@ data:
     name: "FSC147"
     params:
       datadir: ../FSC147_384_V2/
-      targetdir: densitymaps/sig_0.5/size_256/
+      targetdir: densitymaps/exp1/
       n_exemplars: 3
-      transform_kwargs:
-        image_size: 64
-        hflip_p: 0.5
-        cj_p: 0.0
+      image_size: 64
+      tile_size: 64
+      hflip_p: 0.5
+      cj_p: 0.0
+      sigma: 0.5
 
   dataloader:
     params:
       batch_size: 4
-      fraction_of_data: 1.0
       overfit_single_batch: True
 
 train:
