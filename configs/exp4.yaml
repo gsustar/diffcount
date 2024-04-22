@@ -1,0 +1,92 @@
+name: exp4
+seed: 42
+
+diffusion:
+  schedule_sampler: "uniform"
+  type: "Denoise" # or Deblur
+  params:
+    diffusion_steps: 1000
+    noise_schedule: linear
+    learn_sigma: True
+    sigma_small: False
+    use_kl: False
+    predict_xstart: False
+    rescale_timesteps: False
+    rescale_learned_sigmas: False
+    timestep_respacing: ""
+
+model:
+  type: "UNet" # or DiT
+  params:
+    image_size: 512
+    in_channels: 4
+    model_channels: 192
+    out_channels: 1
+    num_res_blocks: 2
+    attention_resolutions: [32, 16, 8]
+    dropout: 0.0
+    channel_mult: [1, 1, 1, 2, 2, 4, 4]
+    conv_resample: True
+    dims: 2
+    num_classes: sequential
+    use_checkpoint: True
+    num_heads: -1
+    num_head_channels: 64
+    num_heads_upsample: -1
+    use_scale_shift_norm: True
+    resblock_updown: True
+    transformer_depth: 1
+    context_dim: null
+    disable_self_attentions: null
+    num_attention_blocks: null
+    disable_middle_self_attn: False
+    disable_middle_transformer: False
+    use_linear_in_transformer: False
+    spatial_transformer_attn_type: softmax-xformers
+    adm_in_channels: 768
+
+conditioner:
+  type: "FSC147"
+  params:
+    image_size: 512
+    out_channels: 256
+    vit_size: "B"
+    freeze_backbone: True
+    remove_sequence_dim: True
+    is_trainable: False
+
+data:
+  dataset:
+    name: "FSC147"
+    params:
+      datadir: /d/hpc/projects/FRI/DL/gs1121/FSC147_384_V2/
+      targetdir: densitymaps/exp4/
+      n_exemplars: 3
+      image_size: 512
+      tile_size: 512
+      hflip_p: 0.5
+      cj_p: 0.8
+      sigma: 0.5
+
+  dataloader:
+    params:
+      batch_size: 4
+      overfit_single_batch: False
+
+train:
+  lr: 1.e-5
+  num_epochs: 0
+  dropout: 0.0
+  grad_clip: -1.0
+  use_fp16: True
+  ema_rate: 0.9999
+  validation_interval: 1
+  resume_checkpoint: /d/hpc/projects/FRI/DL/gs1121/128_512_upsampler.pt
+  # resume_checkpoint: null
+  weight_decay: 0.0
+
+log:
+  logdir: /d/hpc/projects/FRI/DL/gs1121/logs/
+  wandb_mode: online
+  log_interval: 100
+  save_interval: 100

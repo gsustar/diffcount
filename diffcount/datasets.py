@@ -102,7 +102,7 @@ class FSC147(Dataset):
 		with open(os.path.join(self.datadir, 'annotation_FSC147_384.json'), 'rb') as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
-		if clear_cache:
+		if clear_cache and not split in ['val', 'test']:
 			if os.path.exists(self.targetdir):
 				shutil.rmtree(self.targetdir)
 			os.makedirs(self.targetdir)
@@ -134,7 +134,7 @@ class FSC147(Dataset):
 
 		# Resize
 		old_h, old_w = img.shape[-2:]
-		img = F.resize(img, (self.image_size, self.image_size))
+		img = F.resize(img, (self.image_size, self.image_size), antialias=True)
 
 		new_h, new_w = img.shape[-2:]
 		rw = new_w / old_w

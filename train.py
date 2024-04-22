@@ -36,7 +36,7 @@ def main():
 				project="diffcount",
 				name=config.name,
 				group=config.data.dataset.name,
-				config=vars(config),
+				config=namespace_to_dict(config),
 				mode=config.log.wandb_mode,
 			)
 		)
@@ -109,6 +109,13 @@ def dict_to_namespace(d):
 				 dict_to_namespace(v) if isinstance(v, dict)
 				 else v) for k, v in d.items()]
 	return x
+
+
+def namespace_to_dict(namespace):
+    return {
+        k: namespace_to_dict(v) if isinstance(v, SimpleNamespace) else v
+        for k, v in vars(namespace).items()
+    }
 
 
 def parse_config(configpath):

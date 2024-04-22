@@ -82,6 +82,12 @@ class TrainLoop:
 		self.step = checkpoint.get("step", 0)
 		self.epoch = checkpoint.get("epoch", 0)
 
+		self_model_state_dict = self.model.state_dict()
+		model_state_dict = {
+			k:v for k,v in model_state_dict.items() 
+			if k in self_model_state_dict and v.shape==self_model_state_dict[k].shape
+		}
+
 		self.model.load_state_dict(model_state_dict, strict=False)
 		if optimizer_state_dict:
 			self.opt.load_state_dict(optimizer_state_dict)
@@ -110,16 +116,17 @@ class TrainLoop:
 
 	def run_epoch(self):
 		self.model.train()
+		first_batch = True
 		for batch, cond in self.data:
+			if first_batch:
+				log_batch_with_cond(batch, cond, prefix="train", step=self.step)
+				first_batch = False
 			self.run_step(batch, cond)
 		if self.epoch % self.save_interval == 0:
 			self.save()
 		if self.epoch % self.validation_interval == 0:
-			log_batch_with_cond(batch, cond, prefix="train", step=self.step)
 			self.validate()
 		self.epoch += 1
-		# logger.logkv("epoch", self.epoch + self.resume_epoch)
-		logger.logkv("epoch", self.epoch)
 
 	def run_step(self, batch, cond):
 		self.opt.zero_grad()
@@ -156,6 +163,7 @@ class TrainLoop:
 		)
 		# logger.logkv("step", self.step + self.resume_step)
 		logger.logkv("step", self.step)
+		logger.logkv("epoch", self.epoch)
 		logger.logkv("lr", self.opt.param_groups[0]["lr"])
 		logger.logkv_mean("grad_norm", grad_norm)
 		logger.logkv_mean("param_norm", param_norm)
