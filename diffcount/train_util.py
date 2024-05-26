@@ -116,15 +116,12 @@ class TrainLoop:
 
 	def run_epoch(self):
 		self.model.train()
-		first_batch = True
 		for batch, cond in self.data:
-			if first_batch:
-				log_batch_with_cond(batch, cond, prefix="train", step=self.step)
-				first_batch = False
 			self.run_step(batch, cond)
 		if self.epoch % self.save_interval == 0:
 			self.save()
 		if self.epoch % self.validation_interval == 0:
+			log_batch_with_cond(batch, cond, prefix="train", step=self.step)
 			self.validate()
 		self.epoch += 1
 
@@ -178,6 +175,7 @@ class TrainLoop:
 		batch, cond = next(iter(self.val_data))
 		batch = torch_to(batch, self.device)
 		cond = torch_to(cond, self.device)
+		# todo ema sampling
 		samples = self.diffusion.p_sample_loop_progressive(
 			self.model,
 			(self.batch_size, 1, *batch.shape[2:]),

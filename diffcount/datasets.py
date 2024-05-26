@@ -107,7 +107,7 @@ class FSC147(Dataset):
 				shutil.rmtree(self.targetdir)
 			os.makedirs(self.targetdir)
 
-
+	# todo remove this here and deal with it later with resizer
 	def pad(
 		self,
 		img,

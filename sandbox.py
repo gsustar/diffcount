@@ -354,3 +354,20 @@ def parse_config():
 
 if __name__ == "__main__":
 	parse_config()
+
+
+
+# import torch as th
+# import math
+# # import torch.nn.functional as F
+# import torchvision.transforms.functional as F
+
+
+# def _average_exemplar_width_and_height(bboxes):
+# 	ws = bboxes[:, :, 2] - bboxes[:, :, 0]
+# 	hs = bboxes[:, :, 3] - bboxes[:, :, 1]
+# 	return ws.mean(dim=1), hs.mean(dim=1)
+
+
+# def _compute_resize_factor(avg_hs, avg_ws, min_avg_h=5, min_avg_w=5):
+# 	return th.max(min_avg_h / avg_hs, min_avg_w / avg_ws)

@@ -20,39 +20,31 @@ model:
   params:
     image_size: 64
     in_channels: 4
-    model_channels: 64
+    model_channels: 32
     out_channels: 1
     num_res_blocks: 2
     attention_resolutions: [32, 16, 8]
     dropout: 0.0
-    channel_mult: [1, 2, 3, 4]
+    channel_mult: null
     conv_resample: True
     dims: 2
-    num_classes: 'sequential'
+    y_dim: null
+    context_dim: 64
     use_checkpoint: True
-    num_heads: -1
-    num_head_channels: 64
+    num_heads: 1
+    num_head_channels: -1
     num_heads_upsample: -1
     use_scale_shift_norm: True
-    resblock_updown: False
-    transformer_depth: 1
-    context_dim: null
-    disable_self_attentions: null
-    num_attention_blocks: null
-    disable_middle_self_attn: False
-    disable_middle_transformer: False
-    use_linear_in_transformer: False
-    spatial_transformer_attn_type: softmax-xformers
-    adm_in_channels: 768
+    resblock_updown: True
 
 conditioner:
   type: "FSC147"
   params:
     image_size: 64
-    out_channels: 256
+    out_channels: 64
     vit_size: "B"
     freeze_backbone: True
-    remove_sequence_dim: True
+    remove_sequence_dim: False
     is_trainable: False
 
 data:
@@ -70,17 +62,17 @@ data:
 
   dataloader:
     params:
-      batch_size: 4
+      batch_size: 2
       overfit_single_batch: True
 
 train:
-  lr: 1.e-5
+  lr: 1.e-4
   num_epochs: 10000
   dropout: 0.0
-  grad_clip: -1.0
+  grad_clip: 1.0
   use_fp16: False
   ema_rate: 0.9999
-  validation_interval: 200
+  validation_interval: 1000
   resume_checkpoint: null
   weight_decay: 0.0
 

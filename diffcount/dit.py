@@ -11,8 +11,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import math
-from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
+from timm.models.vision_transformer import PatchEmbed, Mlp
 
 from .nn import timestep_embedding
 from .attention import CrossAttention
@@ -25,7 +24,6 @@ def modulate(x, shift, scale):
 #################################################################################
 #               Embedding Layers for Timesteps and Class Labels                 #
 #################################################################################
-
 class TimestepEmbedder(nn.Module):
 	"""
 	Embeds scalar timesteps into vector representations.
@@ -39,35 +37,11 @@ class TimestepEmbedder(nn.Module):
 		)
 		self.frequency_embedding_size = frequency_embedding_size
 
-	# @staticmethod
-	# def timestep_embedding(t, dim, max_period=10000):
-	# 	"""
-	# 	Create sinusoidal timestep embeddings.
-	# 	:param t: a 1-D Tensor of N indices, one per batch element.
-	# 					  These may be fractional.
-	# 	:param dim: the dimension of the output.
-	# 	:param max_period: controls the minimum frequency of the embeddings.
-	# 	:return: an (N, D) Tensor of positional embeddings.
-	# 	"""
-	# 	# https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
-	# 	half = dim // 2
-	# 	freqs = torch.exp(
-	# 		-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
-	# 	).to(device=t.device)
-	# 	args = t[:, None].float() * freqs[None]
-	# 	embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-	# 	if dim % 2:
-	# 		embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-	# 	return embedding
-
 	def forward(self, t):
-		# t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
 		t_freq = timestep_embedding(t, self.frequency_embedding_size)
 		t_emb = self.mlp(t_freq)
 		return t_emb
 
-
-# todo ExemplarEmbedder
 
 # class LabelEmbedder(nn.Module):
 #     """
@@ -107,11 +81,10 @@ class DiTBlock(nn.Module):
 	"""
 	A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
 	"""
-	def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, context_dim=None, **block_kwargs):
+	def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
 		super().__init__()
 		self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-		# self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
-		self.attn = CrossAttention(hidden_size, context_dim=context_dim, heads=num_heads, **block_kwargs)
+		self.attn = CrossAttention(hidden_size, heads=num_heads, **block_kwargs) # is self-attention
 		self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 		mlp_hidden_dim = int(hidden_size * mlp_ratio)
 		approx_gelu = lambda: nn.GELU(approximate="tanh")
@@ -121,9 +94,9 @@ class DiTBlock(nn.Module):
 			nn.Linear(hidden_size, 6 * hidden_size, bias=True)
 		)
 
-	def forward(self, x, c, context=None):
+	def forward(self, x, c):
 		shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
-		x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), context=context)
+		x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
 		x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
 		return x
 
@@ -164,8 +137,7 @@ class DiT(nn.Module):
 		mlp_ratio=4.0,
 		class_dropout_prob=0.1,
 		num_classes=1000,
-		context_dim=None,
-		adm_in_channels=None,
+		y_dim=None, # todo probably remove and figure something else
 		learn_sigma=True,
 	):
 		super().__init__()
@@ -175,18 +147,23 @@ class DiT(nn.Module):
 		# self.out_channels = in_channels * 2 if learn_sigma else in_channels	# todo do this in script_utils
 		self.patch_size = patch_size
 		self.num_heads = num_heads
-		self.adm_in_channels = adm_in_channels
 
 		self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
 		self.t_embedder = TimestepEmbedder(hidden_size)
-		self.y_embedder = nn.Linear(adm_in_channels, hidden_size)
+		if y_dim is not None:
+			self.y_embedder = nn.Sequential(
+				nn.Linear(y_dim, hidden_size),
+				nn.SiLU(),
+				nn.Linear(hidden_size, hidden_size),
+			)
+		# self.y_embedder = nn.Linear(adm_in_channels, hidden_size)
 		# self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
 		num_patches = self.x_embedder.num_patches
 		# Will use fixed sin-cos embedding:
 		self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
 
 		self.blocks = nn.ModuleList([
-			DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, context_dim=context_dim) for _ in range(depth)
+			DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
 		])
 		self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
 		self.initialize_weights()
@@ -250,17 +227,18 @@ class DiT(nn.Module):
 		y: (N,) tensor of class labels
 		"""
 		assert (y is not None) == (
-			self.adm_in_channels is not None
-			), "y must be provided if and only if adm_in_channels is provided"
+			self.y_dim is not None
+			), "y must be provided if and only if y_dim is provided"
 
 		x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
 		t = self.t_embedder(t)                   # (N, D)
-		if self.adm_in_channels is not None:
+		c = t
+		if self.y_dim is not None:
 			y = self.y_embedder(y)    			 # (N, D)
-		c = t + y                                # (N, D)
+			c += y                               # (N, D)
 		for block in self.blocks:
-			x = block(x, c, context)                      # (N, T, D)
-		x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
+			x = block(x, c, context)             # (N, T, D)
+		x = self.final_layer(x, c)               # (N, T, patch_size ** 2 * out_channels)
 		x = self.unpatchify(x)                   # (N, out_channels, H, W)
 		return x
 
@@ -274,6 +252,7 @@ class DiT(nn.Module):
 			**kwargs,
 		)
 
+	# todo inspect and check if rework or remove
 	def forward_with_cfg(self, x, t, y, cfg_scale):
 		"""
 		Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance.

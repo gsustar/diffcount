@@ -11,9 +11,9 @@ def create_model_and_diffusion(
 	model_config, 
 	diffusion_config
 ):	
-	learn_sigma = False
 	if diffusion_config.type == "Deblur":
-		assert not hasattr(diffusion_config.params, "learn_sigma"), "learn_sigma is not supported for Deblur diffusion."
+		learn_sigma = False
+		# assert not hasattr(diffusion_config.params, "learn_sigma"), "learn_sigma is not supported for Deblur diffusion."
 		diffusion = create_deblur_diffusion(
 			**vars(diffusion_config.params)
 		)
@@ -24,6 +24,9 @@ def create_model_and_diffusion(
 		)
 	else:
 		raise ValueError(f"Unsupported diffusion type: {diffusion_config.type}")
+
+	# if hasattr(model_config.params, "learn_sigma"):
+	# 	delattr(model_config.params, "learn_sigma")
 
 	if model_config.type == "UNet":
 		model = create_unet_model(
@@ -86,7 +89,6 @@ def create_data_and_conditioner(
 
 	return train_data, val_data, conditioner
 
-
 def create_unet_model(
 	image_size,
 	in_channels,
@@ -98,22 +100,14 @@ def create_unet_model(
 	channel_mult,
 	conv_resample,
 	dims,
-	num_classes,
+	context_dim,
+	y_dim,
 	use_checkpoint,
 	num_heads,
 	num_head_channels,
 	num_heads_upsample,
 	use_scale_shift_norm,
 	resblock_updown,
-	transformer_depth,
-	context_dim,
-	disable_self_attentions,
-	num_attention_blocks,
-	disable_middle_self_attn,
-	disable_middle_transformer,
-	use_linear_in_transformer,
-	spatial_transformer_attn_type,
-	adm_in_channels,
 	learn_sigma,
 ):
 	if channel_mult is None:
@@ -127,19 +121,15 @@ def create_unet_model(
 			channel_mult = (1, 2, 3, 4)
 		else:
 			raise ValueError(f"unsupported image size: {image_size}")
-
+	else:
+		channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
 
 	attention_ds = []
 	for res in attention_resolutions:
 		attention_ds.append(image_size // int(res))
-	
-	if context_dim is not None:
-		context_dim = int(context_dim)
-
-	if adm_in_channels is not None:
-		adm_in_channels = int(adm_in_channels)
 
 	return UNetModel(
+		image_size=image_size,
 		in_channels=in_channels,
 		model_channels=model_channels,
 		out_channels=(out_channels if not learn_sigma else 2 * out_channels),
@@ -149,23 +139,95 @@ def create_unet_model(
 		channel_mult=channel_mult,
 		conv_resample=conv_resample,
 		dims=dims,
-		num_classes=num_classes,
+		context_dim=context_dim,
+		y_dim=y_dim,
 		use_checkpoint=use_checkpoint,
 		num_heads=num_heads,
 		num_head_channels=num_head_channels,
 		num_heads_upsample=num_heads_upsample,
 		use_scale_shift_norm=use_scale_shift_norm,
 		resblock_updown=resblock_updown,
-		transformer_depth=transformer_depth,
-		context_dim=context_dim,
-		disable_self_attentions=disable_self_attentions,
-		num_attention_blocks=num_attention_blocks,
-		disable_middle_self_attn=disable_middle_self_attn,
-		disable_middle_transformer=disable_middle_transformer,
-		use_linear_in_transformer=use_linear_in_transformer,
-		spatial_transformer_attn_type=spatial_transformer_attn_type,
-		adm_in_channels=adm_in_channels,
 	)
+
+# def create_unet_model(
+# 	image_size,
+# 	in_channels,
+# 	model_channels,
+# 	out_channels,
+# 	num_res_blocks,
+# 	attention_resolutions,
+# 	dropout,
+# 	channel_mult,
+# 	conv_resample,
+# 	dims,
+# 	num_classes,
+# 	use_checkpoint,
+# 	num_heads,
+# 	num_head_channels,
+# 	num_heads_upsample,
+# 	use_scale_shift_norm,
+# 	resblock_updown,
+# 	transformer_depth,
+# 	context_dim,
+# 	disable_self_attentions,
+# 	num_attention_blocks,
+# 	disable_middle_self_attn,
+# 	disable_middle_transformer,
+# 	use_linear_in_transformer,
+# 	spatial_transformer_attn_type,
+# 	adm_in_channels,
+# 	learn_sigma,
+# ):
+# 	if channel_mult is None:
+# 		if image_size == 512:
+# 			channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
+# 		elif image_size == 256:
+# 			channel_mult = (1, 1, 2, 2, 4, 4)
+# 		elif image_size == 128:
+# 			channel_mult = (1, 1, 2, 3, 4)
+# 		elif image_size == 64:
+# 			channel_mult = (1, 2, 3, 4)
+# 		else:
+# 			raise ValueError(f"unsupported image size: {image_size}")
+
+
+# 	attention_ds = []
+# 	for res in attention_resolutions:
+# 		attention_ds.append(image_size // int(res))
+	
+# 	if context_dim is not None:
+# 		context_dim = int(context_dim)
+
+# 	if adm_in_channels is not None:
+# 		adm_in_channels = int(adm_in_channels)
+
+# 	return UNetModel(
+# 		in_channels=in_channels,
+# 		model_channels=model_channels,
+# 		out_channels=(out_channels if not learn_sigma else 2 * out_channels),
+# 		num_res_blocks=num_res_blocks,
+# 		attention_resolutions=tuple(attention_ds),
+# 		dropout=dropout,
+# 		channel_mult=channel_mult,
+# 		conv_resample=conv_resample,
+# 		dims=dims,
+# 		num_classes=num_classes,
+# 		use_checkpoint=use_checkpoint,
+# 		num_heads=num_heads,
+# 		num_head_channels=num_head_channels,
+# 		num_heads_upsample=num_heads_upsample,
+# 		use_scale_shift_norm=use_scale_shift_norm,
+# 		resblock_updown=resblock_updown,
+# 		transformer_depth=transformer_depth,
+# 		context_dim=context_dim,
+# 		disable_self_attentions=disable_self_attentions,
+# 		num_attention_blocks=num_attention_blocks,
+# 		disable_middle_self_attn=disable_middle_self_attn,
+# 		disable_middle_transformer=disable_middle_transformer,
+# 		use_linear_in_transformer=use_linear_in_transformer,
+# 		spatial_transformer_attn_type=spatial_transformer_attn_type,
+# 		adm_in_channels=adm_in_channels,
+# 	)
 
 
 def create_dit_model(
@@ -178,13 +240,13 @@ def create_dit_model(
 	learn_sigma,
 ):
 	model = DiT_models[dit_size](
-        input_size=input_size,
+		input_size=input_size,
 		in_channels=in_channels,
 		out_channels=out_channels,
 		context_dim=context_dim,
 		adm_in_channels=adm_in_channels,
 		learn_sigma=learn_sigma,
-    )
+	)
 	return model
 
 

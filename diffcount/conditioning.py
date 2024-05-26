@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from functools import partial
 from itertools import chain
 
+# todo move this inside class
 from detectron2.modeling import ViT, SimpleFeaturePyramid
 from detectron2.modeling.poolers import ROIPooler
 from detectron2.structures import Boxes
@@ -108,7 +109,7 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 	def __init__(
 		self, 
 		image_size,
-		out_channels=256,
+		out_channels,
 		vit_size="B",
 		freeze_backbone=True,
 		remove_sequence_dim=False,
@@ -206,3 +207,12 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 			x = x.reshape(batch_size, -1)
 		
 		return x
+
+
+class YOLOExemplarEmbedder(AbstractEmbModel):
+	
+	def __init__(self):
+		pass
+
+	def forward(self, img, bboxes):
+		pass
