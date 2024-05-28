@@ -596,7 +596,8 @@ class DenoiseDiffusion(BaseDiffusion):
 
 			# Count loss
 			lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
-			terms["count"] = mean_flat(lmbd_t_count * abs(target_count - model_count))
+			lmbd_count = 0.05
+			terms["count"] = lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
 			terms["loss"] += terms["count"]
 		else:
 			raise NotImplementedError(self.loss_type)
