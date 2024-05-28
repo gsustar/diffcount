@@ -217,18 +217,21 @@ class FSC147(Dataset):
 			self.targetdir, 
 			os.path.splitext(self.img_names[index])[0] + '.npy'
 		)
+		points = self.annotations[self.img_names[index]]['points']
+		target_count = th.tensor(len(points), dtype=th.float32)
+		
 		if os.path.exists(npypath):
 			target = np.load(npypath)
 		else:
 			target = self.generate_density_map(
 				src_size,
 				new_size,
-				self.annotations[self.img_names[index]]['points']
+				points
 			)
 			np.save(npypath, target)
 		target = self.target_transform(target, hflip)
 
-		return target, dict(bboxes=bboxes, img=img)
+		return target, dict(bboxes=bboxes, img=img, count=target_count)
 
 
 def load_data(

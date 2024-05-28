@@ -331,6 +331,24 @@ class SpatialTransformer(nn.Module):
 		return x + x_in
 
 
+class CountingBranch(nn.Module):
+	
+	def __init__(self, input_dim, hidden_dim=64):
+		super().__init__()
+		self.norm = nn.LayerNorm(input_dim)
+		self.mlp = nn.Sequential(
+			nn.Linear(input_dim, hidden_dim),
+			# nn.SiLU(),
+			nn.ReLU(),
+			nn.Linear(hidden_dim, 1)
+		)
+
+	def forward(self, x):
+		x = rearrange(x, 'b c h w-> b (c h w)')
+		x = self.norm(x)
+		x = self.mlp(x)
+		return x
+
 
 class UNetModel(nn.Module):
 	"""
@@ -569,6 +587,14 @@ class UNetModel(nn.Module):
 				self.output_blocks.append(TimestepEmbedSequential(*layers))
 				self._feature_size += ch
 
+
+		self.layer_list = range(1, len(self.output_blocks) + 1, 3)
+		self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+		count_in_dim = int(sum(
+			[model_channels * mult for mult in channel_mult]
+		))
+		self.counting_branch = CountingBranch(count_in_dim, hidden_dim=64)
+
 		self.out = nn.Sequential(
 			nn.GroupNorm(32, ch),
 			nn.SiLU(),
@@ -621,11 +647,16 @@ class UNetModel(nn.Module):
 			x = module(x, emb, y=y, context=context)
 			xs.append(x)
 		x = self.middle_block(x, emb, y=y, context=context)
-		for module in self.output_blocks:
+		feats = []
+		for layer, module in enumerate(self.output_blocks):
 			x = th.cat([x, xs.pop()], dim=1)
 			x = module(x, emb, y=y, context=context)
-		# h = h.type(x.dtype)
-		return self.out(x)
+			if layer in self.layer_list:
+				feats.append(self.global_avg_pool(x))
+		feats = th.cat(feats, dim=1)
+		count = self.counting_branch(feats)
+		out = self.out(x)
+		return out, count
 
 
 	def forward(self, x, t, cond, **kwargs):

@@ -122,6 +122,8 @@ class DenoiseDiffusion(BaseDiffusion):
 		model_var_type,
 		loss_type,
 		rescale_timesteps=False,
+		p2_gamma=0,
+		p2_k=1,
 	):
 		self.model_mean_type = model_mean_type
 		self.model_var_type = model_var_type
@@ -166,6 +168,12 @@ class DenoiseDiffusion(BaseDiffusion):
 			* np.sqrt(alphas)
 			/ (1.0 - self.alphas_cumprod)
 		)
+
+		# P2 weighting
+		self.p2_gamma = p2_gamma
+		self.p2_k = p2_k
+		self.snr = 1.0 / (1 - self.alphas_cumprod) - 1
+
 
 	def q_mean_variance(self, x_start, t):
 		"""
@@ -256,7 +264,7 @@ class DenoiseDiffusion(BaseDiffusion):
 
 		B, C = x.shape[:2]
 		assert t.shape == (B,)
-		model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+		model_output, model_count = model(x, self._scale_timesteps(t), **model_kwargs)
 
 		if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
 			assert model_output.shape == (B, C * 2, *x.shape[2:])
@@ -322,6 +330,7 @@ class DenoiseDiffusion(BaseDiffusion):
 			"variance": model_variance,
 			"log_variance": model_log_variance,
 			"pred_xstart": pred_xstart,
+			"count": model_count,
 		}
 
 	def _predict_xstart_from_eps(self, x_t, t, eps):
@@ -529,6 +538,8 @@ class DenoiseDiffusion(BaseDiffusion):
 		x_t = self.q_sample(x_start, t, noise=noise)
 
 		terms = {}
+		
+		target_count = model_kwargs.pop("count").unsqueeze(1)
 
 		if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
 			terms["loss"] = self._vb_terms_bpd(
@@ -542,7 +553,7 @@ class DenoiseDiffusion(BaseDiffusion):
 			if self.loss_type == LossType.RESCALED_KL:
 				terms["loss"] *= self.num_timesteps
 		elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-			model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
+			model_output, model_count = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
 			if self.model_var_type in [
 				ModelVarType.LEARNED,
@@ -574,11 +585,19 @@ class DenoiseDiffusion(BaseDiffusion):
 				ModelMeanType.EPSILON: noise,
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
-			terms["mse"] = mean_flat((target - model_output) ** 2)
+			# P2 weighting
+			lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
+			terms["mse"] = mean_flat(lmbd_t_mse * (target - model_output) ** 2)
+
 			if "vb" in terms:
 				terms["loss"] = terms["mse"] + terms["vb"]
 			else:
 				terms["loss"] = terms["mse"]
+
+			# Count loss
+			lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
+			terms["count"] = mean_flat(lmbd_t_count * abs(target_count - model_count))
+			terms["loss"] += terms["count"]
 		else:
 			raise NotImplementedError(self.loss_type)
 

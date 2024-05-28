@@ -129,6 +129,7 @@ class TrainLoop:
 		self.opt.zero_grad()
 		batch = torch_to(batch, self.device)
 		cond = torch_to(cond, self.device)
+		count = cond.pop("count")
 		t, weights = self.schedule_sampler.sample(batch.shape[0], self.device)
 		with th.autocast(device_type=self.device, dtype=th.float16, enabled=self.use_fp16):
 			losses = self.diffusion.training_losses(
@@ -136,7 +137,8 @@ class TrainLoop:
 				batch,
 				t,
 				model_kwargs=dict(
-					cond=self.conditioner(cond)
+					cond=self.conditioner(cond),
+					count=count,
 				),
 			)
 		if isinstance(self.schedule_sampler, LossAwareSampler):

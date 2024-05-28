@@ -18,7 +18,7 @@ diffusion:
 model:
   type: "UNet" # or DiT
   params:
-    image_size: 64
+    image_size: 128
     in_channels: 4
     model_channels: 32
     out_channels: 1
@@ -40,7 +40,7 @@ model:
 conditioner:
   type: "FSC147"
   params:
-    image_size: 64
+    image_size: 128
     out_channels: 64
     vit_size: "B"
     freeze_backbone: True
@@ -54,8 +54,8 @@ data:
       datadir: ../FSC147_384_V2/
       targetdir: densitymaps/exp1/
       n_exemplars: 3
-      image_size: 64
-      tile_size: 64
+      image_size: 128
+      tile_size: 128
       hflip_p: 0.5
       cj_p: 0.0
       sigma: 0.5
