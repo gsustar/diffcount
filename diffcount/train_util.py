@@ -186,7 +186,7 @@ class TrainLoop:
 			)
 		)
 		samples = list(samples)
-		logger.loggif(samples, "sampling", self.step)
+		# logger.loggif(samples, "sampling", self.step)
 		logger.logimg(samples[-1], "final", self.step)
 		logger.savetensor(samples[-1], "final", self.step)
 		log_batch_with_cond(batch, cond, prefix="val", step=self.step)

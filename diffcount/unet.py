@@ -656,7 +656,7 @@ class UNetModel(nn.Module):
 		feats = th.cat(feats, dim=1)
 		count = self.counting_branch(feats)
 		out = self.out(x)
-		return out, count
+		return dict(out=out, count=count)
 
 
 	def forward(self, x, t, cond, **kwargs):

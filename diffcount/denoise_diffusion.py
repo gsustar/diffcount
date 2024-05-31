@@ -122,8 +122,6 @@ class DenoiseDiffusion(BaseDiffusion):
 		model_var_type,
 		loss_type,
 		rescale_timesteps=False,
-		p2_gamma=0,
-		p2_k=1,
 	):
 		self.model_mean_type = model_mean_type
 		self.model_var_type = model_var_type
@@ -170,8 +168,8 @@ class DenoiseDiffusion(BaseDiffusion):
 		)
 
 		# P2 weighting
-		self.p2_gamma = p2_gamma
-		self.p2_k = p2_k
+		self.p2_gamma = 0.5
+		self.p2_k = 1.0
 		self.snr = 1.0 / (1 - self.alphas_cumprod) - 1
 
 
@@ -264,7 +262,7 @@ class DenoiseDiffusion(BaseDiffusion):
 
 		B, C = x.shape[:2]
 		assert t.shape == (B,)
-		model_output, model_count = model(x, self._scale_timesteps(t), **model_kwargs)
+		model_output = model(x, self._scale_timesteps(t), **model_kwargs)["out"]
 
 		if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
 			assert model_output.shape == (B, C * 2, *x.shape[2:])
@@ -330,7 +328,6 @@ class DenoiseDiffusion(BaseDiffusion):
 			"variance": model_variance,
 			"log_variance": model_log_variance,
 			"pred_xstart": pred_xstart,
-			"count": model_count,
 		}
 
 	def _predict_xstart_from_eps(self, x_t, t, eps):
@@ -553,7 +550,10 @@ class DenoiseDiffusion(BaseDiffusion):
 			if self.loss_type == LossType.RESCALED_KL:
 				terms["loss"] *= self.num_timesteps
 		elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-			model_output, model_count = model(x_t, self._scale_timesteps(t), **model_kwargs)
+			model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
+
+			model_count = model_output["count"]
+			model_output = model_output["out"]
 
 			if self.model_var_type in [
 				ModelVarType.LEARNED,
@@ -566,12 +566,13 @@ class DenoiseDiffusion(BaseDiffusion):
 				# it affect our mean prediction.
 				frozen_out = th.cat([model_output.detach(), model_var_values], dim=1)
 				terms["vb"] = self._vb_terms_bpd(
-					model=lambda *args, r=frozen_out: r,
+					model=lambda *args, r=frozen_out: dict(out=r),
 					x_start=x_start,
 					x_t=x_t,
 					t=t,
 					clip_denoised=False,
 				)["output"]
+
 				if self.loss_type == LossType.RESCALED_MSE:
 					# Divide by 1000 for equivalence with initial implementation.
 					# Without a factor of 1/1000, the VB term hurts the MSE term.
@@ -585,20 +586,25 @@ class DenoiseDiffusion(BaseDiffusion):
 				ModelMeanType.EPSILON: noise,
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
-			# P2 weighting
-			lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
+
+			lmbd_t_mse = 1.0
+			lmbd_t_count = 1.0
+			# lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
+			# lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
+			lmbd_count = 0.005
+			lmbd_vb = 0.001
+
 			terms["mse"] = mean_flat(lmbd_t_mse * (target - model_output) ** 2)
+			terms["count"] = mean_flat(lmbd_t_count * abs(target_count - model_count))
 
+			if th.any(th.isnan(terms["count"])):
+				print(f'targets: {target_count}, pred: {model_count}')
+				assert False
+
+			terms["loss"] = terms["mse"] + lmbd_count * terms["count"]
 			if "vb" in terms:
-				terms["loss"] = terms["mse"] + terms["vb"]
-			else:
-				terms["loss"] = terms["mse"]
+				terms["loss"] = terms["loss"] + lmbd_vb * terms["vb"]
 
-			# Count loss
-			lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
-			lmbd_count = 0.05
-			terms["count"] = lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
-			terms["loss"] += terms["count"]
 		else:
 			raise NotImplementedError(self.loss_type)
 
