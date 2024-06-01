@@ -81,14 +81,15 @@ class DiTBlock(nn.Module):
 	"""
 	A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
 	"""
-	def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+	def __init__(self, hidden_size, num_heads, mlp_input_size=None, mlp_ratio=4.0, **block_kwargs):
 		super().__init__()
 		self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 		self.attn = CrossAttention(hidden_size, heads=num_heads, **block_kwargs) # is self-attention
 		self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 		mlp_hidden_dim = int(hidden_size * mlp_ratio)
+		mlp_input_dim = hidden_size if mlp_input_size is None else mlp_input_size
 		approx_gelu = lambda: nn.GELU(approximate="tanh")
-		self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0)
+		self.mlp = Mlp(in_features=mlp_input_dim, hidden_features=mlp_hidden_dim, out_features=hidden_size, act_layer=approx_gelu, drop=0)
 		self.adaLN_modulation = nn.Sequential(
 			nn.SiLU(),
 			nn.Linear(hidden_size, 6 * hidden_size, bias=True)

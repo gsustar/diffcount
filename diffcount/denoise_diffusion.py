@@ -595,15 +595,16 @@ class DenoiseDiffusion(BaseDiffusion):
 			lmbd_vb = 0.001
 
 			terms["mse"] = mean_flat(lmbd_t_mse * (target - model_output) ** 2)
-			terms["count"] = mean_flat(lmbd_t_count * abs(target_count - model_count))
+			terms["count"] = lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
+			terms["vb"] = lmbd_vb * terms["vb"]
 
 			if th.any(th.isnan(terms["count"])):
 				print(f'targets: {target_count}, pred: {model_count}')
 				assert False
 
-			terms["loss"] = terms["mse"] + lmbd_count * terms["count"]
+			terms["loss"] = terms["mse"] + terms["count"]
 			if "vb" in terms:
-				terms["loss"] = terms["loss"] + lmbd_vb * terms["vb"]
+				terms["loss"] = terms["loss"] + terms["vb"]
 
 		else:
 			raise NotImplementedError(self.loss_type)

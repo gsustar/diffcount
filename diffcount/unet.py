@@ -38,13 +38,14 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
 	A sequential module that passes timestep embeddings to the children that
 	support it as an extra input.
 	"""
-	def forward(self, x, emb, y=None, context=None):
+	# def forward(self, x, emb, y=None, context=None):
+	def forward(self, x, emb, context=None):
 		for layer in self:
 			if isinstance(layer, TimestepBlock):
 				x = layer(x, emb)
 			elif isinstance(layer, SpatialTransformer):
-				x = layer(x, y=y, context=context)
-				# x = layer(x, y=emb, context=context)
+				# x = layer(x, y=y, context=context)
+				x = layer(x, y=emb, context=context)
 			else:
 				x = layer(x)
 		return x
@@ -247,14 +248,11 @@ class SpatialTransformer(nn.Module):
 		d_head,
 		depth=1,
 		dropout=0.,
-		y_dim=None,
 		context_dim=None,
+		y_dim=None,
+		adalnzero=False,
 	):
 		super().__init__()
-		# todo maybe only y_dim without adalnzero to specify when to use adalnzero
-		assert not (y_dim is not None and context_dim is not None), (
-			"cannot specify both y_dim and context_dim"
-		)
 
 		if d_head == -1:
 			d_head = in_channels // n_heads
@@ -264,8 +262,8 @@ class SpatialTransformer(nn.Module):
 			)
 			n_heads = in_channels // d_head
 	
+		self.adalnzero = adalnzero
 		self.in_channels = in_channels
-		self.y_dim = y_dim
 		inner_dim = n_heads * d_head
 		self.norm = nn.GroupNorm(32, in_channels, eps=1e-6, affine=True)
 
@@ -280,12 +278,6 @@ class SpatialTransformer(nn.Module):
 		# 		for d in range(depth)]
 		# )
 
-		if y_dim is not None:
-			self.y_embed = nn.Sequential(
-				nn.Linear(y_dim, inner_dim),
-				nn.SiLU(),
-				nn.Linear(inner_dim, inner_dim),
-			)
 
 		self.transformer_blocks = nn.ModuleList(
 			[
@@ -295,12 +287,13 @@ class SpatialTransformer(nn.Module):
 					d_head, 
 					dropout=dropout, 
 					context_dim=context_dim
-				) if y_dim is None else 
+				) if not adalnzero else 
 				DiTBlock(
 					inner_dim,
 					n_heads,
 					dim_head=d_head,
 					dropout=dropout,
+					mlp_input_size=y_dim,
 				)
 				for _ in range(depth)
 			]
@@ -320,9 +313,7 @@ class SpatialTransformer(nn.Module):
 		x = self.proj_in(x)
 		x = rearrange(x, 'b c h w -> b (h w) c')
 		for block in self.transformer_blocks:
-			if self.y_dim is not None:
-				assert y.shape[0] == x.shape[0]
-				y = self.y_embed(y)
+			if self.adalnzero:
 				x = block(x, c=y)
 			else:
 				x = block(x, context=context)
@@ -401,6 +392,7 @@ class UNetModel(nn.Module):
 		num_heads_upsample=-1,
 		use_scale_shift_norm=False,
 		resblock_updown=False,
+		adalnzero=False,
 	):
 		super().__init__()
 
@@ -422,6 +414,7 @@ class UNetModel(nn.Module):
 		self.num_heads = num_heads
 		self.num_head_channels = num_head_channels
 		self.num_heads_upsample = num_heads_upsample
+		self.adalnzero = adalnzero
 
 		time_embed_dim = model_channels * 4
 		self.time_embed = nn.Sequential(
@@ -429,6 +422,15 @@ class UNetModel(nn.Module):
 			nn.SiLU(),
 			linear(time_embed_dim, time_embed_dim),
 		)
+
+		if y_dim is not None:
+			self.y_embed = nn.Sequential(
+				nn.Linear(y_dim, time_embed_dim),
+				# nn.Linear(y_dim, inner_dim),
+				nn.SiLU(),
+				# nn.Linear(inner_dim, inner_dim),
+				nn.Linear(time_embed_dim, time_embed_dim),
+			)
 
 		# if self.num_classes is not None:
 		# 	self.label_emb = nn.Embedding(num_classes, time_embed_dim)
@@ -469,6 +471,7 @@ class UNetModel(nn.Module):
 							d_head=num_head_channels,
 							y_dim=y_dim,
 							context_dim=context_dim,
+							adalnzero=adalnzero,
 						)
 	  
 					)
@@ -522,6 +525,7 @@ class UNetModel(nn.Module):
 				d_head=num_head_channels,
 				y_dim=y_dim,
 				context_dim=context_dim,
+				adalnzero=adalnzero,
 			),
 			ResBlock(
 				ch,
@@ -565,6 +569,7 @@ class UNetModel(nn.Module):
 							d_head=num_head_channels,
 							y_dim=y_dim,
 							context_dim=context_dim,
+							adalnzero=adalnzero,
 						)
 					)
 				if level and i == num_res_blocks:
@@ -637,20 +642,25 @@ class UNetModel(nn.Module):
 		xs = []
 		emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 		
+		if y is not None:
+			assert y.shape[0] == x.shape[0]
+			emb = emb + self.y_embed(y)
 		# if self.num_classes is not None:
 		# 	assert y.shape == (x.shape[0],)
 		# 	emb = emb + self.label_emb(y)
 
-
 		# h = x.type(self.dtype)
 		for module in self.input_blocks:
-			x = module(x, emb, y=y, context=context)
+			# x = module(x, emb, y=y, context=context)
+			x = module(x, emb, context=context)
 			xs.append(x)
-		x = self.middle_block(x, emb, y=y, context=context)
+		# x = self.middle_block(x, emb, y=y, context=context)
+		x = self.middle_block(x, emb, context=context)
 		feats = []
 		for layer, module in enumerate(self.output_blocks):
 			x = th.cat([x, xs.pop()], dim=1)
-			x = module(x, emb, y=y, context=context)
+			# x = module(x, emb, y=y, context=context)
+			x = module(x, emb, context=context)
 			if layer in self.layer_list:
 				feats.append(self.global_avg_pool(x))
 		feats = th.cat(feats, dim=1)
