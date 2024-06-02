@@ -88,6 +88,7 @@ def main():
 			num_epochs=config.train.num_epochs,
 			device=dev,
 			grad_clip=config.train.grad_clip,
+			lr_scheduler=config.train.lr_scheduler
 		).run_loop()
 	except Exception as e:
 		raise e

@@ -31,6 +31,7 @@ class TrainLoop:
 		weight_decay=0.0,
 		num_epochs=0,
 		grad_clip=0.0,
+		lr_scheduler=None,
 	):
 		self.model = model
 		self.diffusion = diffusion
@@ -49,6 +50,7 @@ class TrainLoop:
 		self.weight_decay = weight_decay
 		self.num_epochs = num_epochs
 		self.grad_clip = grad_clip
+		self.lr_scheduler = lr_scheduler
 
 		self.step = 0
 		self.epoch = 0
@@ -58,7 +60,7 @@ class TrainLoop:
 		self.conditioner = conditioner
 		self.opt = self.configure_optimizer()
 		self.scaler = th.cuda.amp.GradScaler(enabled=self.use_fp16)
-		self.scheduler = None
+		self.sch = self.configure_scheduler(self.opt)
 		self.ema = ExponentialMovingAverage(
 			self.model.parameters(),
 			decay=ema_rate,
@@ -74,11 +76,9 @@ class TrainLoop:
 		model_state_dict = checkpoint.get("model", checkpoint)
 		optimizer_state_dict = checkpoint.get("optimizer", None)
 		conditioner_state_dict = checkpoint.get("conditioner", None)
-		# scheduler_state_dict 	= checkpoint.get("scheduler", None)
+		scheduler_state_dict = checkpoint.get("scheduler", None)
 		scaler_state_dict = checkpoint.get("scaler", None)
 		ema_state_dict = checkpoint.get("ema", None)
-		# self.resume_step = checkpoint.get("step", 0)
-		# self.resume_epoch = checkpoint.get("epoch", 0)
 		self.step = checkpoint.get("step", 0)
 		self.epoch = checkpoint.get("epoch", 0)
 
@@ -93,8 +93,8 @@ class TrainLoop:
 			self.opt.load_state_dict(optimizer_state_dict)
 		if conditioner_state_dict:
 			self.conditioner.load_state_dict(conditioner_state_dict)
-		# if scheduler_state_dict:
-		# 	self.scheduler.load_state_dict(scheduler_state_dict)
+		if scheduler_state_dict:
+			self.sch.load_state_dict(scheduler_state_dict)
 		if scaler_state_dict:
 			self.scaler.load_state_dict(scaler_state_dict)
 		if ema_state_dict:
@@ -149,6 +149,7 @@ class TrainLoop:
 
 		self.scaler.scale(loss).backward()
 		self.scaler.unscale_(self.opt)
+		self.sch.step()
 
 		grad_norm, param_norm = self.compute_norms()
 		if self.grad_clip > 0:
@@ -221,18 +222,20 @@ class TrainLoop:
 		opt.register_step_post_hook(
 			lambda optimizer, args, kwargs: self.ema.update(self.model.parameters()) 
 		)
-		# if self.scheduler_config is not None:
-		# 	scheduler = instantiate_from_config(self.scheduler_config)
-		# 	print("Setting up LambdaLR scheduler...")
-		# 	scheduler = [
-		# 		{
-		# 			"scheduler": LambdaLR(opt, lr_lambda=scheduler.schedule),
-		# 			"interval": "step",
-		# 			"frequency": 1,
-		# 		}
-		# 	]
-		# 	return [opt], scheduler
 		return opt
+
+	def configure_scheduler(self, opt):
+		if self.lr_scheduler == "linear_warmup":
+			sch = th.optim.lr_scheduler.LinearLR(
+				optimizer=opt, 
+				start_factor=0.01,
+				total_iters=5000
+			)
+		elif self.lr_scheduler is None:
+			sch = None
+		else:
+			raise ValueError(f"Unsupported lr_scheduler: {self.lr_scheduler}")
+		return sch
 
 	def compute_norms(self):
 		grad_norm = 0.0
