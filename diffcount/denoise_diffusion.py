@@ -587,11 +587,11 @@ class DenoiseDiffusion(BaseDiffusion):
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
 
-			# lmbd_t_mse = 1.0
+			lmbd_t_mse = 1.0
 			lmbd_t_count = 1.0
-			lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
+			# lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
 			# lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
-			lmbd_count = 0.0
+			lmbd_count = 0.001
 			lmbd_vb = 0.001
 
 			terms["mse"] = mean_flat(lmbd_t_mse * (target - model_output) ** 2)

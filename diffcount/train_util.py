@@ -149,7 +149,6 @@ class TrainLoop:
 
 		self.scaler.scale(loss).backward()
 		self.scaler.unscale_(self.opt)
-		self.sch.step()
 
 		grad_norm, param_norm = self.compute_norms()
 		if self.grad_clip > 0:
@@ -157,6 +156,8 @@ class TrainLoop:
 
 		self.scaler.step(self.opt)
 		self.scaler.update()
+		if self.sch is not None:
+			self.sch.step()
 
 		log_loss_dict(
 			self.diffusion, t, {k: v * weights for k, v in losses.items()}
@@ -198,13 +199,11 @@ class TrainLoop:
 		filename = f"model{(self.epoch):06d}.pt"
 		with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
 			checkpoint = {
-				# "epoch": self.epoch + self.resume_epoch,
 				"epoch": self.epoch,
-				# "step": self.step + self.resume_step,
 				"step": self.step,
 				"model": self.model.state_dict(),
 				"optimizer": self.opt.state_dict(),
-				"scheduler": None,
+				"scheduler": self.sch.state_dict() if self.sch is not None else None,
 				"scaler": self.scaler.state_dict(),
 				"ema": self.ema.state_dict(),
 				"conditioner": self.conditioner.state_dict()

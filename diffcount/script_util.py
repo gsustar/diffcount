@@ -109,6 +109,7 @@ def create_unet_model(
 	use_scale_shift_norm,
 	resblock_updown,
 	learn_sigma,
+	adalnzero,
 ):
 	if channel_mult is None:
 		if image_size == 512:
@@ -147,6 +148,7 @@ def create_unet_model(
 		num_heads_upsample=num_heads_upsample,
 		use_scale_shift_norm=use_scale_shift_norm,
 		resblock_updown=resblock_updown,
+		adalnzero=adalnzero,
 	)
 
 # def create_unet_model(

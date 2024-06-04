@@ -1,6 +1,6 @@
 #!/bin/sh
 
-#SBATCH --job-name=fsc_train
+#SBATCH --job-name=run_train
 #SBATCH --output=/d/hpc/projects/FRI/DL/gs1121/logs/R-%x.%j.out
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1

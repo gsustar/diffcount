@@ -41,7 +41,7 @@ class MNIST(Dataset):
 	def __getitem__(self, index):
 		img, cls = self.dataset[index]
 		cls = th.tensor(cls)
-		return img, dict(cls=cls, count=0)
+		return img, dict(cls=cls, count=None)
 
 
 class FSC147(Dataset):
