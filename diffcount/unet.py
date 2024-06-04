@@ -293,7 +293,7 @@ class SpatialTransformer(nn.Module):
 					n_heads,
 					dim_head=d_head,
 					dropout=dropout,
-					mlp_input_size=y_dim,
+					adaln_input_size=y_dim,
 				)
 				for _ in range(depth)
 			]
@@ -469,7 +469,7 @@ class UNetModel(nn.Module):
 							ch, 
 							n_heads=num_heads, 
 							d_head=num_head_channels,
-							y_dim=y_dim,
+							y_dim=time_embed_dim,
 							context_dim=context_dim,
 							adalnzero=adalnzero,
 						)
@@ -523,7 +523,7 @@ class UNetModel(nn.Module):
 				ch, 
 				n_heads=num_heads, 
 				d_head=num_head_channels,
-				y_dim=y_dim,
+				y_dim=time_embed_dim,
 				context_dim=context_dim,
 				adalnzero=adalnzero,
 			),
@@ -567,7 +567,7 @@ class UNetModel(nn.Module):
 							ch, 
 							n_heads=num_heads, 
 							d_head=num_head_channels,
-							y_dim=y_dim,
+							y_dim=time_embed_dim,
 							context_dim=context_dim,
 							adalnzero=adalnzero,
 						)
