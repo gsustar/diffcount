@@ -1,6 +1,7 @@
 import blobfile as bf
 import torch as th
 import numpy as np
+import pprint
 from torch.optim import AdamW
 
 from . import logger
@@ -82,13 +83,24 @@ class TrainLoop:
 		self.step = checkpoint.get("step", 0)
 		self.epoch = checkpoint.get("epoch", 0)
 
-		self_model_state_dict = self.model.state_dict()
-		model_state_dict = {
-			k:v for k,v in model_state_dict.items() 
-			if k in self_model_state_dict and v.shape==self_model_state_dict[k].shape
-		}
+		# self_model_state_dict = self.model.state_dict()
+		# model_state_dict = {
+		# 	k:v for k,v in model_state_dict.items() 
+		# 	if k in self_model_state_dict and v.shape==self_model_state_dict[k].shape
+		# }
+		msd = dict()
+		self_msd = self.model.state_dict()
+		for k, v in model_state_dict.items():
+			if k in self_msd and v.shape != self_msd[k].shape:
+				logger.log(
+					f"size mismatch for {k}: copying a param with shape {v.shape} from checkpoint, the shape in current model is {self_msd[k].shape}"
+				)
+			else:
+				msd[k] = v
+		m, u = self.model.load_state_dict(msd, strict=False)
+		if m: logger.log(f"missing keys: {pprint.pformat(m)}\n")
+		if u: logger.log(f"unexpected keys: {pprint.pformat(u)}\n")
 
-		self.model.load_state_dict(model_state_dict, strict=False)
 		if optimizer_state_dict:
 			self.opt.load_state_dict(optimizer_state_dict)
 		if conditioner_state_dict:
