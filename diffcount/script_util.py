@@ -1,3 +1,5 @@
+import yaml
+from types import SimpleNamespace
 from . import denoise_diffusion as dd
 from . import deblur_diffusion as bd
 from .datasets import FSC147, MNIST, load_data
@@ -47,21 +49,23 @@ def create_model_and_diffusion(
 def create_data_and_conditioner(
 	data_config,
 	conditioner_config,
+	train,
 ):
+	splits = ['train', 'val', None] if train else [None, 'val', 'test']
 	if data_config.dataset.name == "FSC147":
-		train_dataset, val_dataset = (
+		train_dataset, val_dataset, test_dataset = (
 			FSC147(
 				**vars(data_config.dataset.params),
 				split=split
-			) for split in ['train', 'val']
+			) if split else None for split in splits
 		)
 		create_conditioner_fn = create_fsc147_conditioner
 	elif data_config.dataset.name == "MNIST":
-		train_dataset, val_dataset = (
+		train_dataset, val_dataset, test_dataset = (
 			MNIST(
 				**vars(data_config.dataset.params),
 				split=split,
-			) for split in ['train', 'val']
+			) if split else None for split in splits
 		)
 		create_conditioner_fn = create_mnist_conditioner
 	else:
@@ -74,20 +78,29 @@ def create_data_and_conditioner(
 	else:
 		conditioner = create_empty_conditioner()
 
-	train_data = load_data(
-		dataset=train_dataset,
-		batch_size=data_config.dataloader.params.batch_size,
-		shuffle=True,
-		overfit_single_batch=data_config.dataloader.params.overfit_single_batch,
-	)
-
+	if train:
+		train_data = load_data(
+			dataset=train_dataset,
+			batch_size=data_config.dataloader.params.batch_size,
+			shuffle=True,
+			overfit_single_batch=data_config.dataloader.params.overfit_single_batch,
+		)
+		test_data = None
+	else:
+		test_data = load_data(
+			dataset=test_dataset,
+			batch_size=data_config.dataloader.params.batch_size,
+			shuffle=False,
+		)
+		train_data = None
+	
 	val_data = load_data(
 		dataset=val_dataset,
 		batch_size=data_config.dataloader.params.batch_size,
 		shuffle=False,
 	) if not data_config.dataloader.params.overfit_single_batch else train_data
 
-	return train_data, val_data, conditioner
+	return train_data, val_data, test_data, conditioner
 
 def create_unet_model(
 	image_size,
@@ -352,3 +365,28 @@ def create_denoise_diffusion(
 		loss_type=loss_type,
 		rescale_timesteps=rescale_timesteps,
 	)
+
+
+def dict_to_namespace(d):
+	x = SimpleNamespace()
+	_ = [setattr(x, k,
+				 dict_to_namespace(v) if isinstance(v, dict)
+				 else v) for k, v in d.items()]
+	return x
+
+
+def namespace_to_dict(namespace):
+    return {
+        k: namespace_to_dict(v) if isinstance(v, SimpleNamespace) else v
+        for k, v in vars(namespace).items()
+    }
+
+
+def parse_config(configpath):
+	with open(configpath, "r") as stream:
+		try:
+			return dict_to_namespace(
+				yaml.safe_load(stream)
+			)
+		except yaml.YAMLError as e:
+			print(e)

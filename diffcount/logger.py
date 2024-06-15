@@ -12,6 +12,7 @@ import time
 import datetime
 import tempfile
 import numpy as np
+import torch as th
 from collections import defaultdict
 from contextlib import contextmanager
 from .plot_utils import to_pil_image
@@ -116,8 +117,9 @@ class HumanOutputFormat(KVWriter, SeqWriter, ImgWriter, GifWriter, TensorWriter)
 	def _get_media_savedir(self, step):
 		savedir = self.mediadir
 		if step is not None:
+			subdir = f"step_{step}" if isinstance(step, int) else step
 			savedir = osp.join(
-				self.mediadir, f"step_{step}"
+				self.mediadir, subdir
 			)
 		os.makedirs(savedir, exist_ok=True)
 		return savedir

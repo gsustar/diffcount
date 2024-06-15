@@ -1,17 +1,18 @@
 import argparse
 import datetime
 import pprint
-import yaml
+import shutil
 
 import os.path as osp
 import torch as th
 
-from types import SimpleNamespace
 from diffcount import logger
 from diffcount.resample import create_named_schedule_sampler
 from diffcount.script_util import (
 	create_model_and_diffusion,
-	create_data_and_conditioner
+	create_data_and_conditioner,
+	namespace_to_dict,
+	parse_config,
 )
 from diffcount.train_util import TrainLoop
 from diffcount.deblur_diffusion import DeblurDiffusion
@@ -38,8 +39,10 @@ def main():
 				group=config.data.dataset.name,
 				config=namespace_to_dict(config),
 				mode=config.log.wandb_mode,
-			)
+			),
+			log_suffix='_train'
 		)
+		shutil.copy(args.config, osp.join(logger.get_dir(), "config.yaml"))
 
 		logger.log(pprint.pformat(config))
 		logger.log("creating model and diffusion...")
@@ -56,12 +59,13 @@ def main():
 		logger.log("creating data loader and conditioner...")
 		config_conditioner = None
 		if hasattr(config, "conditioner"):
-			assert 	config.conditioner.type == config.data.dataset.name, \
+			assert config.conditioner.type == config.data.dataset.name, \
 					"conditioner type must match dataset"
 			config_conditioner = config.conditioner
-		train_data, val_data, conditioner = create_data_and_conditioner(
+		train_data, val_data, _, conditioner = create_data_and_conditioner(
 			config.data, 
-			config_conditioner
+			config_conditioner,
+			train=True
 		)
 		conditioner.to(dev)
 
@@ -102,31 +106,6 @@ def parse_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--config", type=str)
 	return parser.parse_args()
-
-
-def dict_to_namespace(d):
-	x = SimpleNamespace()
-	_ = [setattr(x, k,
-				 dict_to_namespace(v) if isinstance(v, dict)
-				 else v) for k, v in d.items()]
-	return x
-
-
-def namespace_to_dict(namespace):
-    return {
-        k: namespace_to_dict(v) if isinstance(v, SimpleNamespace) else v
-        for k, v in vars(namespace).items()
-    }
-
-
-def parse_config(configpath):
-	with open(configpath, "r") as stream:
-		try:
-			return dict_to_namespace(
-				yaml.safe_load(stream)
-			)
-		except yaml.YAMLError as e:
-			print(e)
 
 
 if __name__ == "__main__":

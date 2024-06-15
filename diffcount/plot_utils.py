@@ -1,6 +1,7 @@
 import torch as th
 import numpy as np
 import torchvision
+import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 from torchvision.utils import make_grid
 
@@ -25,8 +26,10 @@ def _maybe_to_plotting_range(x):
 		.detach()
 	)
 
-def to_pil_image(tensor, **grid_kwargs):
+def to_pil_image(tensor, cmap='gray', **grid_kwargs):
 	# tensor must be in range [-1, 1] or already in [0, 255]
+	if isinstance(tensor, Image.Image):
+		return tensor
 	grid_defaults = dict(
 		nrow=int(
 			np.sqrt(tensor.shape[0])
@@ -34,12 +37,24 @@ def to_pil_image(tensor, **grid_kwargs):
 		padding=2,
 		pad_value=0.0
 	)
+	_, C, _, _ = tensor.shape
 	grid_defaults.update(grid_kwargs)
 	tensor = _maybe_to_plotting_range(tensor)
 	grid = make_grid(tensor, **grid_defaults)
 	grid = grid.permute(1, 2, 0)
 	grid = grid.numpy()
+	if C == 1:
+		cm = plt.get_cmap(cmap)
+		grid = cm(grid[:, :, 0], bytes=True)
+		# grid = (grid * 255).astype(np.uint8)
 	return Image.fromarray(grid)
+
+
+def overlay(img1, img2):
+	img2.putalpha(64)
+	img1.paste(img2, (0, 0), img2)
+	return img1
+
 
 def draw_bboxes(t, bboxes):
 	imgs = [

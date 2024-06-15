@@ -101,7 +101,7 @@ class BaseDiffusion:
 			progress=progress,
 		):
 			final = sample
-		return final["sample"]
+		return final
 	
 	def ddim_sample(
 		self,
@@ -157,7 +157,7 @@ class BaseDiffusion:
 					model_kwargs=model_kwargs,
 					eta=eta,
 				)
-				yield out
+				yield out["sample"]
 				img = out["sample"]
 	
 	def ddim_sample_loop(
@@ -190,4 +190,4 @@ class BaseDiffusion:
 			eta=eta,
 		):
 			final = sample
-		return final["sample"]
+		return final
