@@ -6,7 +6,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 from diffcount import logger
-from diffcount.plot_utils import to_pil_image, overlay
+from diffcount.plot_utils import to_pil_image, draw_result
 from diffcount.count import pmax_threshold_count
 from diffcount.train_util import torch_to
 from diffcount.script_util import (
@@ -84,14 +84,16 @@ def main():
 					)
 				logger.log(f"{i+1}/{N}")
 
-				for j,s in enumerate(samples):
-					img = to_pil_image(cond["img"][j].unsqueeze(0))
-					density = to_pil_image(s.unsqueeze(0), cmap="viridis")
-					res = overlay(img, density)
-					logger.logimg(res, name=f"{i}_{j}", step="results")
 				
 				target_count = cond["count"].float()
 				pred_count = pmax_threshold_count(samples).float()
+
+				if not args.skip_plotting:
+					for j,s in enumerate(samples):
+						img = cond["img"][j].unsqueeze(0)
+						density = s.unsqueeze(0)
+						res = draw_result(img, density, pred_count[j], target_count[j])
+						logger.logimg(res, name=f"{i}_{j}", step="results")
 
 				RMSE[split] += th.sqrt(th.mean((target_count - pred_count) ** 2)).item()
 				MAE[split] += th.mean(th.abs(target_count - pred_count)).item()
@@ -112,6 +114,7 @@ def parse_args():
 	parser.add_argument("--batch_size", type=int, default=16)
 	parser.add_argument("--ddim_steps", type=int, default=None)
 	parser.add_argument("--use_fp16", action="store_true")
+	parser.add_argument("--skip_plotting", action="store_false")
 	return parser.parse_args()
 
 

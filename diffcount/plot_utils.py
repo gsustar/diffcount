@@ -50,10 +50,19 @@ def to_pil_image(tensor, cmap='gray', **grid_kwargs):
 	return Image.fromarray(grid)
 
 
-def overlay(img1, img2):
-	img2.putalpha(64)
-	img1.paste(img2, (0, 0), img2)
-	return img1
+
+def draw_result(img, density, pred_count, target_count):
+	img = to_pil_image(img)
+	density = to_pil_image(density, cmap="viridis")
+
+	density.putalpha(64)
+	img.paste(density, (0, 0), density)
+
+	draw = ImageDraw.Draw(img)
+	font = ImageFont.load_default(size=24)
+	draw.text((0, 0), f"{pred_count:.1f}", fill="green", font=font)
+	draw.text((0, 24), f"{target_count:.1f}", fill="red", font=font)
+	return img
 
 
 def draw_bboxes(t, bboxes):
@@ -64,6 +73,7 @@ def draw_bboxes(t, bboxes):
 		for i, img in enumerate(_maybe_to_plotting_range(t))
 	]
 	return th.stack(imgs)
+
 
 def draw_cls(xc):
 	txts = list()
