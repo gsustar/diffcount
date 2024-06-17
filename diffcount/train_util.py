@@ -2,6 +2,9 @@ import blobfile as bf
 import torch as th
 import numpy as np
 import pprint
+import signal
+import sys
+
 from torch.optim import AdamW
 
 from . import logger
@@ -69,6 +72,8 @@ class TrainLoop:
 		if self.resume_checkpoint:
 			self.load()
 
+		signal.signal(signal.SIGTERM, self.cleanup)
+		signal.signal(signal.SIGINT, self.cleanup)
 
 	def load(self):
 		logger.log(f"loading model from checkpoint: {self.resume_checkpoint}...")
@@ -113,18 +118,14 @@ class TrainLoop:
 			self.ema.load_state_dict(ema_state_dict)
 
 	def run_loop(self):
-		try:
-			while (
-				# (not self.num_epochs or self.epoch + self.resume_epoch < self.num_epochs)
-				(not self.num_epochs or self.epoch < self.num_epochs)
-			):
-				self.run_epoch()
-			# Save the last checkpoint if it wasn't already saved.
-			if (self.epoch - 1) % self.save_interval != 0:
-				self.save()
-		except:
+		while (
+			# (not self.num_epochs or self.epoch + self.resume_epoch < self.num_epochs)
+			(not self.num_epochs or self.epoch < self.num_epochs)
+		):
+			self.run_epoch()
+		# Save the last checkpoint if it wasn't already saved.
+		if (self.epoch - 1) % self.save_interval != 0:
 			self.save()
-			raise
 
 	def run_epoch(self):
 		self.model.train()
@@ -257,6 +258,12 @@ class TrainLoop:
 				if p.grad is not None:
 					grad_norm += th.norm(p.grad, p=2, dtype=th.float32).item() ** 2
 		return np.sqrt(grad_norm), np.sqrt(param_norm)
+	
+	def cleanup(self, signum, frame):
+		logger.log("closing...")
+		logger.close()
+		self.save()
+		sys.exit(0)
 
 
 def torch_to(x, *args, **kwargs):
