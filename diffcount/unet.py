@@ -503,6 +503,7 @@ class UNetModel(nn.Module):
 				ds *= 2
 				self._feature_size += ch
 
+		count_in_dim = ch
 		self.middle_block = TimestepEmbedSequential(
 			ResBlock(
 				ch,
@@ -593,12 +594,12 @@ class UNetModel(nn.Module):
 				self._feature_size += ch
 
 
-		self.layer_list = range(1, len(self.output_blocks) + 1, 3)
+		# self.layer_list = range(1, len(self.output_blocks) + 1, 3)
 		self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
-		count_in_dim = int(sum(
-			[model_channels * mult for mult in channel_mult]
-		))
-		self.counting_branch = CountingBranch(count_in_dim, hidden_dim=64)
+		# count_in_dim = int(sum(
+		# 	[model_channels * mult for mult in channel_mult]
+		# ))
+		self.counting_branch = CountingBranch(count_in_dim, hidden_dim=128)
 
 		self.out = nn.Sequential(
 			nn.GroupNorm(32, ch),
@@ -656,15 +657,16 @@ class UNetModel(nn.Module):
 			xs.append(x)
 		# x = self.middle_block(x, emb, y=y, context=context)
 		x = self.middle_block(x, emb, context=context)
-		feats = []
+		count = self.counting_branch(self.global_avg_pool(x))
+		# feats = []
 		for layer, module in enumerate(self.output_blocks):
 			x = th.cat([x, xs.pop()], dim=1)
 			# x = module(x, emb, y=y, context=context)
 			x = module(x, emb, context=context)
-			if layer in self.layer_list:
-				feats.append(self.global_avg_pool(x))
-		feats = th.cat(feats, dim=1)
-		count = self.counting_branch(feats)
+			# if layer in self.layer_list:
+			# 	feats.append(self.global_avg_pool(x))
+		# feats = th.cat(feats, dim=1)
+		# count = self.counting_branch(feats)
 		out = self.out(x)
 		return dict(out=out, count=count)
 
