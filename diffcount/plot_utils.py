@@ -50,18 +50,17 @@ def to_pil_image(tensor, cmap='gray', **grid_kwargs):
 	return Image.fromarray(grid)
 
 
-
 def draw_result(img, density, pred_count, target_count):
 	img = to_pil_image(img)
 	density = to_pil_image(density, cmap="viridis")
 
-	density.putalpha(64)
+	density.putalpha(192)
 	img.paste(density, (0, 0), density)
 
 	draw = ImageDraw.Draw(img)
-	font = ImageFont.load_default(size=24)
-	draw.text((0, 0), f"{pred_count:.1f}", fill="green", font=font)
-	draw.text((0, 24), f"{target_count:.1f}", fill="red", font=font)
+	font = ImageFont.load_default(size=14)
+	draw.text((0, 0), f"pred: {pred_count:>.1f}", fill="white", font=font)
+	draw.text((0, 20), f"GT: {target_count:>.1f}", fill="green", font=font)
 	return img
 
 

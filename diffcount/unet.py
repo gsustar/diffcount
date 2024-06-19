@@ -599,7 +599,7 @@ class UNetModel(nn.Module):
 		# count_in_dim = int(sum(
 		# 	[model_channels * mult for mult in channel_mult]
 		# ))
-		self.counting_branch = CountingBranch(count_in_dim, hidden_dim=128)
+		self.counting_branch = CountingBranch(count_in_dim, hidden_dim=64)
 
 		self.out = nn.Sequential(
 			nn.GroupNorm(32, ch),

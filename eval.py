@@ -82,19 +82,18 @@ def main():
 							cond=conditioner(cond)
 						)
 					)
-				logger.log(f"{i+1}/{N}")
 
-				
 				target_count = cond["count"].float()
 				pred_count = pmax_threshold_count(samples).float()
 
 				if not args.skip_plotting:
-					for j,s in enumerate(samples):
+					for j, s in enumerate(samples):
 						img = cond["img"][j].unsqueeze(0)
 						density = s.unsqueeze(0)
 						res = draw_result(img, density, pred_count[j], target_count[j])
-						logger.logimg(res, name=f"{i}_{j}", step="results")
+						logger.logimg(res, name=f"{split}_{i*args.batch_size + j}", step="results")
 
+				logger.log(f"{i+1}/{N}")
 				RMSE[split] += th.sqrt(th.mean((target_count - pred_count) ** 2)).item()
 				MAE[split] += th.mean(th.abs(target_count - pred_count)).item()
 
@@ -114,7 +113,7 @@ def parse_args():
 	parser.add_argument("--batch_size", type=int, default=16)
 	parser.add_argument("--ddim_steps", type=int, default=None)
 	parser.add_argument("--use_fp16", action="store_true")
-	parser.add_argument("--skip_plotting", action="store_false")
+	parser.add_argument("--skip_plotting", action="store_true")
 	return parser.parse_args()
 
 
