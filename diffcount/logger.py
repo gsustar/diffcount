@@ -65,9 +65,9 @@ class HumanOutputFormat(KVWriter, SeqWriter, ImgWriter, GifWriter, TensorWriter)
 		self.mediadir = None
 		if filename_or_file != sys.stdout:
 			self.mediadir = osp.join(osp.dirname(filename_or_file), "media")
-			if osp.exists(self.mediadir):
-				shutil.rmtree(self.mediadir)
-			os.makedirs(self.mediadir)
+			# if osp.exists(self.mediadir):
+			# 	shutil.rmtree(self.mediadir)
+			os.makedirs(self.mediadir, exist_ok=True)
 
 	def writekvs(self, kvs):
 		# Create strings for printing
