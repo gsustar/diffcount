@@ -330,7 +330,6 @@ def create_deblur_diffusion(
 def create_denoise_diffusion(
 	diffusion_steps,
 	learn_sigma,
-	learn_count,
 	sigma_small,
 	noise_schedule,
 	use_kl,
@@ -345,8 +344,6 @@ def create_denoise_diffusion(
 		loss_type = dd.LossType.RESCALED_KL
 	elif rescale_learned_sigmas:
 		loss_type = dd.LossType.RESCALED_MSE
-	elif learn_count:
-		loss_type = dd.LossType.MSE_COUNT
 	else:
 		loss_type = dd.LossType.MSE
 	if not timestep_respacing:

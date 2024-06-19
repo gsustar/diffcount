@@ -92,7 +92,6 @@ class LossType(enum.Enum):
 	RESCALED_MSE = enum.auto()  # use raw MSE loss (with RESCALED_KL when learning variances)
 	KL = enum.auto()  # use the variational lower-bound
 	RESCALED_KL = enum.auto()  # like KL, but rescale to estimate the full VLB
-	MSE_COUNT = enum.auto()  # MSE + count loss
 
 	def is_vb(self):
 		return self == LossType.KL or self == LossType.RESCALED_KL
@@ -123,7 +122,7 @@ class DenoiseDiffusion(BaseDiffusion):
 		model_var_type,
 		loss_type,
 		rescale_timesteps=False,
-		lmbd_count=0.005,
+		lmbd_count=0.0,
 	):
 		self.model_mean_type = model_mean_type
 		self.model_var_type = model_var_type
@@ -555,8 +554,7 @@ class DenoiseDiffusion(BaseDiffusion):
 			if self.loss_type == LossType.RESCALED_KL:
 				terms["loss"] *= self.num_timesteps
 		elif (self.loss_type == LossType.MSE or 
-			  self.loss_type == LossType.RESCALED_MSE or
-			  self.loss_type == LossType.MSE_COUNT):
+			  self.loss_type == LossType.RESCALED_MSE):
 			
 			model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
@@ -585,10 +583,8 @@ class DenoiseDiffusion(BaseDiffusion):
 					# Divide by 1000 for equivalence with initial implementation.
 					# Without a factor of 1/1000, the VB term hurts the MSE term.
 					terms["vb"] *= self.num_timesteps / 1000.0
-			
-			if self.loss_type == LossType.MSE_COUNT:
-				lmbd_t_count = 1.0
-				terms["count"] = self.lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
+		
+
 
 			target = {
 				ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
@@ -599,15 +595,13 @@ class DenoiseDiffusion(BaseDiffusion):
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
 
+			lmbd_t_count = 1.0
 			# lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
 			# lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
 
+			terms["count"] = self.lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
 			terms["mse"] = mean_flat((target - model_output) ** 2)
-			
-			terms["loss"] = terms["mse"]
-			if "count" in terms:
-				terms["loss"] = terms["loss"] + terms["count"]
-
+			terms["loss"] = terms["mse"] + terms["count"]
 			if "vb" in terms:
 				terms["loss"] = terms["loss"] + terms["vb"]
 
