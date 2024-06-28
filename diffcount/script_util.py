@@ -122,6 +122,7 @@ def create_unet_model(
 	use_scale_shift_norm,
 	resblock_updown,
 	learn_sigma,
+	learn_count,
 	adalnzero,
 ):
 	if channel_mult is None:
@@ -162,6 +163,7 @@ def create_unet_model(
 		use_scale_shift_norm=use_scale_shift_norm,
 		resblock_updown=resblock_updown,
 		adalnzero=adalnzero,
+		learn_count=learn_count,
 	)
 
 # def create_unet_model(

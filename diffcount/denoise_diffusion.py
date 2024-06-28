@@ -585,7 +585,7 @@ class DenoiseDiffusion(BaseDiffusion):
 					terms["vb"] *= self.num_timesteps / 1000.0
 		
 
-
+			# todo: try V prametrization and x_start parametrization
 			target = {
 				ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
 					x_start=x_start, x_t=x_t, t=t
@@ -595,13 +595,19 @@ class DenoiseDiffusion(BaseDiffusion):
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
 
-			lmbd_t_count = 1.0
 			# lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
-			# lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
-
-			terms["count"] = self.lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
 			terms["mse"] = mean_flat((target - model_output) ** 2)
-			terms["loss"] = terms["mse"] + terms["count"]
+
+			lmbd_t_count = 1.0
+			# lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
+			if model_count is not None and target_count is not None:
+				terms["count"] = self.lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
+
+
+			terms["loss"] = terms["mse"]
+			if "count" in terms:
+				terms["loss"] = terms["loss"] + terms["count"]
+
 			if "vb" in terms:
 				terms["loss"] = terms["loss"] + terms["vb"]
 

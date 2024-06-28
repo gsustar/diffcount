@@ -324,17 +324,32 @@ class SpatialTransformer(nn.Module):
 
 class CountingBranch(nn.Module):
 	
-	def __init__(self, input_dim, hidden_dim=64):
+	def __init__(self, feat_dims, hidden_dim=64, use_conv=False):
 		super().__init__()
-		self.norm = nn.LayerNorm(input_dim)
+
+		self.use_conv = use_conv
+		self.num_feats = len(feat_dims)
+		self.input_dim = self.num_feats * hidden_dim if use_conv else int(sum(feat_dims.values()))
+
+		if use_conv:
+			self.conv1s = nn.ModuleDict(
+				{key: nn.Conv2d(in_dim, hidden_dim, 1) for key, in_dim in feat_dims.items()}
+			)
+		self.avgpool = nn.AdaptiveAvgPool2d(1)
+		self.norm = nn.LayerNorm(self.input_dim)
 		self.mlp = nn.Sequential(
-			nn.Linear(input_dim, hidden_dim),
-			# nn.SiLU(),
-			nn.ReLU(),
+			nn.Linear(self.input_dim, hidden_dim),
+			nn.SiLU(),
+			# nn.ReLU(),
 			nn.Linear(hidden_dim, 1)
 		)
 
-	def forward(self, x):
+	def forward(self, feats):
+		if self.use_conv:
+			x = [self.conv1s[key](feats[key]) for key in feats]
+		else:
+			x = [feats[key] for key in feats]
+		x = th.cat([self.avgpool(feats[key]) for key in feats], dim=1)
 		x = rearrange(x, 'b c h w-> b (c h w)')
 		x = self.norm(x)
 		x = self.mlp(x)
@@ -393,6 +408,7 @@ class UNetModel(nn.Module):
 		use_scale_shift_norm=False,
 		resblock_updown=False,
 		adalnzero=False,
+		learn_count=False,
 	):
 		super().__init__()
 
@@ -415,6 +431,7 @@ class UNetModel(nn.Module):
 		self.num_head_channels = num_head_channels
 		self.num_heads_upsample = num_heads_upsample
 		self.adalnzero = adalnzero
+		self.learn_count = learn_count
 
 		time_embed_dim = model_channels * 4
 		self.time_embed = nn.Sequential(
@@ -594,12 +611,13 @@ class UNetModel(nn.Module):
 				self._feature_size += ch
 
 
-		# self.layer_list = range(1, len(self.output_blocks) + 1, 3)
-		self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
-		# count_in_dim = int(sum(
-		# 	[model_channels * mult for mult in channel_mult]
-		# ))
-		self.counting_branch = CountingBranch(count_in_dim, hidden_dim=64)
+		if learn_count:
+			# layer_list = [1, 4, 7, 10, 13, 17]
+			self.feat_extract_list = [2, 5, 8, 11, 14, 17, 20][:len(channel_mult)]
+			feat_dims = {
+				f"p{layer}": model_channels * mult for layer, mult in zip(self.feat_extract_list, channel_mult)
+			}
+			self.counting_branch = CountingBranch(feat_dims, hidden_dim=64, use_conv=False)
 
 		self.out = nn.Sequential(
 			nn.GroupNorm(32, ch),
@@ -641,34 +659,34 @@ class UNetModel(nn.Module):
 		assert (y is not None) == (self.y_dim is not None)
 
 		xs = []
+		en_feats = {}
+		de_feats = {}
 		emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 		
 		if y is not None:
 			assert y.shape[0] == x.shape[0]
 			emb = emb + self.y_embed(y)
-		# if self.num_classes is not None:
-		# 	assert y.shape == (x.shape[0],)
-		# 	emb = emb + self.label_emb(y)
 
-		# h = x.type(self.dtype)
 		for module in self.input_blocks:
-			# x = module(x, emb, y=y, context=context)
 			x = module(x, emb, context=context)
 			xs.append(x)
-		# x = self.middle_block(x, emb, y=y, context=context)
+
 		x = self.middle_block(x, emb, context=context)
-		count = self.counting_branch(self.global_avg_pool(x))
-		# feats = []
+
 		for layer, module in enumerate(self.output_blocks):
-			x = th.cat([x, xs.pop()], dim=1)
-			# x = module(x, emb, y=y, context=context)
+			e = xs.pop()
+			x = th.cat([x, e], dim=1)
 			x = module(x, emb, context=context)
-			# if layer in self.layer_list:
-			# 	feats.append(self.global_avg_pool(x))
-		# feats = th.cat(feats, dim=1)
-		# count = self.counting_branch(feats)
+
+			if layer in self.feat_extract_list:
+				en_feats[f"p{layer}"] = e.clone()
+				de_feats[f"p{layer}"] = x.clone()
+
+		count = None
+		if self.learn_count:
+			count = self.counting_branch(de_feats)
 		out = self.out(x)
-		return dict(out=out, count=count)
+		return dict(out=out, count=count, en_feats=en_feats, de_feats=de_feats)
 
 
 	def forward(self, x, t, cond, **kwargs):
