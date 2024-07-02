@@ -13,6 +13,9 @@ def create_model_and_diffusion(
 	model_config, 
 	diffusion_config
 ):	
+	assert not model_config.params.learn_count and diffusion_config.params.pred_count_from_xstart, (
+		"learn_count and pred_count_from_xstart cannot both be True."
+	)
 	if diffusion_config.type == "Deblur":
 		learn_sigma = False
 		# assert not hasattr(diffusion_config.params, "learn_sigma"), "learn_sigma is not supported for Deblur diffusion."
@@ -339,7 +342,10 @@ def create_denoise_diffusion(
 	rescale_timesteps,
 	rescale_learned_sigmas,
 	timestep_respacing,
+	lmbd_vlb,
 	lmbd_count,
+	t_count_weighting_scheme,
+	pred_count_from_xstart,
 ):
 	betas = dd.get_named_beta_schedule(noise_schedule, diffusion_steps)
 	if use_kl:
@@ -367,7 +373,10 @@ def create_denoise_diffusion(
 		),
 		loss_type=loss_type,
 		rescale_timesteps=rescale_timesteps,
+		lmbd_vlb=lmbd_vlb,
 		lmbd_count=lmbd_count,
+		t_count_weighting_scheme=t_count_weighting_scheme,
+		pred_count_from_xstart=pred_count_from_xstart,
 	)
 
 

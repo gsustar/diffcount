@@ -12,6 +12,7 @@ import numpy as np
 import torch as th
 
 from .nn import mean_flat
+from .count import pmax_threshold_count
 from .losses import normal_kl, discretized_gaussian_log_likelihood
 from .base_diffusion import BaseDiffusion
 
@@ -122,15 +123,20 @@ class DenoiseDiffusion(BaseDiffusion):
 		model_var_type,
 		loss_type,
 		rescale_timesteps=False,
+		lmbd_vlb=0.001,
 		lmbd_count=0.0,
+		t_count_weighting_scheme="uniform",
+		pred_count_from_xstart=False,
 	):
 		self.model_mean_type = model_mean_type
 		self.model_var_type = model_var_type
 		self.loss_type = loss_type
 		self.rescale_timesteps = rescale_timesteps
 
-		self.lmbd_vb = 0.001
+		self.lmbd_vb = lmbd_vlb
 		self.lmbd_count = lmbd_count
+		self.t_count_weighting_scheme = t_count_weighting_scheme
+		self.pred_count_from_xstart = pred_count_from_xstart
 
 		# Use float64 for accuracy.
 		betas = np.array(betas, dtype=np.float64)
@@ -171,10 +177,24 @@ class DenoiseDiffusion(BaseDiffusion):
 			/ (1.0 - self.alphas_cumprod)
 		)
 
-		# P2 weighting
-		self.p2_gamma = 0.5
-		self.p2_k = 1.0
 		self.snr = 1.0 / (1 - self.alphas_cumprod) - 1
+		self.lmbd_t = (1.0 - betas) * (1.0 - self.alphas_cumprod) / betas
+
+		if self.t_count_weighting_scheme == "p2":
+			k = 1.0
+			gamma = 0.5
+			p2 = self.lmbd_t / (k + self.snr) ** gamma
+			self.t_count_weights = (p2 - p2.min()) / (p2.max() - p2.min())
+
+		elif self.t_count_weighting_scheme == "exp":
+			k = 50.0
+			self.t_count_weights = 1 - (np.exp(-k * (np.arange(self.num_timesteps) / self.num_timesteps)) - 1) / (np.exp(-k) - 1)
+
+		elif self.t_count_weighting_scheme == "uniform":
+			self.t_count_weights = np.ones(self.num_timesteps)
+
+		else:
+			raise ValueError(f"Unknown t_count_weighting_scheme: {self.t_count_weighting_scheme}")
 
 
 	def q_mean_variance(self, x_start, t):
@@ -540,9 +560,11 @@ class DenoiseDiffusion(BaseDiffusion):
 
 		terms = {}
 		
+		pred_xstart = None
 		target_count = model_kwargs.pop("count").unsqueeze(1)
 
 		if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
+			# This if branch won't work because model returns dict which _vb doesn't expect
 			terms["loss"] = self._vb_terms_bpd(
 				model=model,
 				x_start=x_start,
@@ -571,19 +593,20 @@ class DenoiseDiffusion(BaseDiffusion):
 				# Learn the variance using the variational bound, but don't let
 				# it affect our mean prediction.
 				frozen_out = th.cat([model_output.detach(), model_var_values], dim=1)
-				terms["vb"] = self._vb_terms_bpd(
+				_vb = self._vb_terms_bpd(
 					model=lambda *args, r=frozen_out: dict(out=r),
 					x_start=x_start,
 					x_t=x_t,
 					t=t,
 					clip_denoised=False,
-				)["output"] * self.lmbd_vb
+				)
+				terms["vb"] = _vb["output"] * self.lmbd_vb
+				pred_xstart = _vb["pred_xstart"]
 
 				if self.loss_type == LossType.RESCALED_MSE:
 					# Divide by 1000 for equivalence with initial implementation.
 					# Without a factor of 1/1000, the VB term hurts the MSE term.
 					terms["vb"] *= self.num_timesteps / 1000.0
-		
 
 			# todo: try V prametrization and x_start parametrization
 			target = {
@@ -595,14 +618,23 @@ class DenoiseDiffusion(BaseDiffusion):
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
 
-			# lmbd_t_mse = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target.shape)
+			if self.pred_count_from_xstart:
+				if pred_xstart is None:
+					if self.model_mean_type == ModelMeanType.START_X:
+						pred_xstart = model_output
+					elif self.model_mean_type == ModelMeanType.EPSILON:
+						pred_xstart = self._predict_xstart_from_eps(x_t, t, model_output)
+					elif self.model_mean_type == ModelMeanType.PREVIOUS_X:
+						pred_xstart = self._predict_xstart_from_xprev(x_t, t, model_output)
+					else:
+						raise NotImplementedError(self.model_mean_type)
+				model_count = pmax_threshold_count(pred_xstart)
+
 			terms["mse"] = mean_flat((target - model_output) ** 2)
 
-			lmbd_t_count = 1.0
-			# lmbd_t_count = _extract_into_tensor(1 / (self.p2_k + self.snr)**self.p2_gamma, t, target_count.shape)
+			lmbd_t_count = _extract_into_tensor(self.t_count_weights, t, target_count.shape)
 			if model_count is not None and target_count is not None:
 				terms["count"] = self.lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
-
 
 			terms["loss"] = terms["mse"]
 			if "count" in terms:

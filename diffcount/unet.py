@@ -611,9 +611,9 @@ class UNetModel(nn.Module):
 				self._feature_size += ch
 
 
+		self.feat_extract_list = [2, 5, 8, 11, 14, 17, 20][:len(channel_mult)]
 		if learn_count:
 			# layer_list = [1, 4, 7, 10, 13, 17]
-			self.feat_extract_list = [2, 5, 8, 11, 14, 17, 20][:len(channel_mult)]
 			feat_dims = {
 				f"p{layer}": model_channels * mult for layer, mult in zip(self.feat_extract_list, channel_mult)
 			}
