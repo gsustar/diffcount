@@ -92,7 +92,8 @@ def main():
 		num_epochs=config.train.num_epochs,
 		device=dev,
 		grad_clip=config.train.grad_clip,
-		lr_scheduler=config.train.lr_scheduler
+		lr_scheduler=config.train.lr_scheduler,
+		seed=config.train.seed
 	).run_loop()
 
 
