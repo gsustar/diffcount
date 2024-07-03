@@ -138,7 +138,7 @@ class TrainLoop:
 		self.model.train()
 		for batch, cond in self.data:
 			self.run_step(batch, cond)
-		if self.epoch % self.save_interval == 0:
+		if self.epoch % self.save_interval == 0 and self.epoch != 0:
 			self.save()
 		if self.epoch % self.validation_interval == 0:
 			log_batch_with_cond(batch, cond, prefix="train", step=self.step)

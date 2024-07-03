@@ -12,6 +12,7 @@
 #SBATCH --signal=SIGTERM@300
 
 export WANDB__SERVICE_WAIT=300
+export HF_DATASETS_CACHE=/d/hpc/projects/FRI/DL/gs1121/.cache
 
 srun --kill-on-bad-exit=1 \
 	python train.py --config $1
