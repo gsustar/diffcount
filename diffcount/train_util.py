@@ -140,7 +140,7 @@ class TrainLoop:
 			self.run_step(batch, cond)
 		if self.epoch % self.save_interval == 0 and self.epoch != 0:
 			self.save()
-		if self.epoch % self.validation_interval == 0:
+		if self.epoch % self.validation_interval == 0 and self.epoch != 0:
 			log_batch_with_cond(batch, cond, prefix="train", step=self.step)
 			self.validate()
 		self.epoch += 1
@@ -202,7 +202,7 @@ class TrainLoop:
 		# todo ema sampling
 		samples = self.diffusion.p_sample_loop_progressive(
 			self.model,
-			(self.batch_size, 1, *batch.shape[2:]),
+			batch.shape,
 			model_kwargs=dict(
 				cond=self.conditioner(cond)
 			)
@@ -267,9 +267,9 @@ class TrainLoop:
 		return np.sqrt(grad_norm), np.sqrt(param_norm)
 	
 	def cleanup(self, signum, frame):
+		self.save()
 		logger.log("closing...")
 		logger.close()
-		self.save()
 		sys.exit(0)
 
 

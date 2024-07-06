@@ -690,7 +690,7 @@ class UNetModel(nn.Module):
 
 
 	def forward(self, x, t, cond, **kwargs):
-		x = th.cat((x, cond.get("concat", th.Tensor([]).type_as(x))), dim=1)
+		x = th.cat((x, cond.get("concat", th.tensor([]).type_as(x))), dim=1)
 		return self._forward(
 			x,
 			timesteps=t,

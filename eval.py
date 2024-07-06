@@ -1,6 +1,7 @@
 import argparse
 import torch as th
 import os.path as osp
+import os
 
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -65,6 +66,7 @@ def main():
 	MAE = {"val": 0.0, "test": 0.0}
 	for split in ["val", "test"]:
 		logger.log(f"evaluating on {split} set...")
+		# os.makedirs(osp.join(logger.get_dir(), "/media/results/" split), exist_ok=True)
 		eval_data = val_data if split == "val" else test_data
 		N = len(eval_data)
 		for i, (batch, cond) in enumerate(eval_data):
@@ -77,7 +79,7 @@ def main():
 				with th.autocast(device_type=dev, dtype=th.float16, enabled=args.use_fp16):
 					samples = sample_fn(
 						model,
-						(args.batch_size, 1, *batch.shape[2:]),
+						batch.shape,
 						model_kwargs=dict(
 							cond=conditioner(cond)
 						)
@@ -91,7 +93,7 @@ def main():
 						img = cond["img"][j].unsqueeze(0)
 						density = s.unsqueeze(0)
 						res = draw_result(img, density, pred_count[j], target_count[j])
-						logger.logimg(res, name=f"{split}_{i*args.batch_size + j}", step="results")
+						logger.logimg(res, name=f"{i*args.batch_size + j}", step=f"results/{split}")
 
 				logger.log(f"{i+1}/{N}")
 				RMSE[split] += th.sqrt(th.mean((target_count - pred_count) ** 2)).item()
@@ -100,10 +102,8 @@ def main():
 		RMSE[split] /= N
 		MAE[split] /= N
 
-	logger.log(f"val RMSE: {RMSE['val']:.4f}")
-	logger.log(f"val MAE: {MAE['val']:.4f}")
-	logger.log(f"test RMSE: {RMSE['test']:.4f}")
-	logger.log(f"test MAE: {MAE['test']:.4f}")	
+		logger.log(f"{split} RMSE: {RMSE[split]:.4f}")
+		logger.log(f"{split} MAE: {MAE[split]:.4f}")
 
 
 def parse_args():
