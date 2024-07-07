@@ -7,11 +7,12 @@ import sys
 import random
 import os
 
+from itertools import islice
 from torch.optim import AdamW
 
 from . import logger
 from .resample import LossAwareSampler, UniformSampler
-from .plot_utils import draw_bboxes, draw_cls
+from .plot_utils import draw_bboxes, draw_cls, draw_denoising_process, draw_result
 from .ema import ExponentialMovingAverage
 
 
@@ -199,23 +200,20 @@ class TrainLoop:
 		batch, cond = next(iter(self.val_data))
 		batch = torch_to(batch, self.device)
 		cond = torch_to(cond, self.device)
-		# todo ema sampling
-		samples = self.diffusion.p_sample_loop_progressive(
-			self.model,
-			batch.shape,
-			model_kwargs=dict(
-				cond=self.conditioner(cond)
-			)
-		)
-		samples = list(samples)
-		# logger.loggif(samples, "sampling", self.step)
-		logger.logimg(samples[-1], "final", self.step)
-		logger.savetensor(samples[-1], "final", self.step)
-		log_batch_with_cond(batch, cond, prefix="val", step=self.step)
+		with th.autocast(device_type=self.device, dtype=th.float16, enabled=self.use_fp16):
+			with self.ema.average_parameters(self.model.parameters()):
+				samples = self.diffusion.p_sample_loop_progressive(
+					self.model,
+					batch.shape,
+					model_kwargs=dict(
+						cond=self.conditioner(cond)
+					)
+				)
+				log_denoising_process(samples, self.diffusion, t_step=125, step=self.step)
+				log_batch_with_cond(batch, cond, prefix="val", step=self.step)
 
 	def save(self):
 		logger.log(f"saving model...")
-		# filename = f"model{(self.epoch+self.resume_epoch):06d}.pt"
 		filename = f"model{(self.epoch):06d}.pt"
 		with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
 			checkpoint = {
@@ -319,3 +317,18 @@ def log_batch_with_cond(batch, cond, prefix="train", step=None):
 	if "cls" in cond:
 		img = draw_cls(cond["cls"])
 		logger.logimg(img, f"{prefix}_cond", step=step)
+
+
+def log_denoising_process(samples, diffusion, t_step=125, step=None):
+	assert diffusion.num_timesteps % t_step == 0
+	out = []
+	pred_xstart = []
+	for i, s in enumerate(samples):
+		if i % t_step == 0 or i == diffusion.num_timesteps - 1:
+			out.append(s["sample"])
+			pred_xstart.append(s["pred_xstart"])
+	final = out[-1]
+	imgs = draw_denoising_process(pred_xstart)
+	logger.logimg(imgs, "pred_xstarts", step=step)
+	logger.logimg(final, "final", step=step)
+	logger.savetensor(final, "final", step)

@@ -50,6 +50,14 @@ def to_pil_image(tensor, cmap='gray', **grid_kwargs):
 	return Image.fromarray(grid)
 
 
+def draw_denoising_process(imgs):
+	assert imgs[0].dim() == 4
+	imgs = th.stack(imgs)
+	imgs = imgs[:, 0, :, :, :]
+	imgs = to_pil_image(imgs, nrow=len(imgs), padding=1, pad_value=127)
+	return imgs
+
+
 def draw_result(img, density, pred_count, target_count):
 	img = to_pil_image(img)
 	density = to_pil_image(density, cmap="viridis")
@@ -58,18 +66,18 @@ def draw_result(img, density, pred_count, target_count):
 	img.paste(density, (0, 0), density)
 
 	draw = ImageDraw.Draw(img)
-	font = ImageFont.load_default(size=14)
-	draw.text((0, 0), f"pred: {pred_count:>.1f}", fill="white", font=font)
-	draw.text((0, 20), f"GT: {target_count:>.1f}", fill="green", font=font)
+	font = ImageFont.load_default(size=10)
+	draw.text((0, 0), f"PR: {pred_count:>.1f}", fill="white", font=font)
+	draw.text((0, 12), f"GT: {target_count:>.1f}", fill="green", font=font)
 	return img
 
 
-def draw_bboxes(t, bboxes):
+def draw_bboxes(img, bboxes):
 	imgs = [
 		torchvision.utils.draw_bounding_boxes(
 			img, boxes=bboxes[i], colors="red"
 		)
-		for i, img in enumerate(_maybe_to_plotting_range(t))
+		for i, img in enumerate(_maybe_to_plotting_range(img))
 	]
 	return th.stack(imgs)
 

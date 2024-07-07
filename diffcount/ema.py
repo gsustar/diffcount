@@ -95,7 +95,7 @@ class ExponentialMovingAverage:
 			param.data.copy_(c_param.data)
 
 	@contextmanager
-	def average_parameters(self, parameters):
+	def average_parameters(self, parameters, verbose=False):
 		"""
 		Context manager for validation/inference with averaged parameters.
 
@@ -114,12 +114,14 @@ class ExponentialMovingAverage:
 		"""
 		self.store(parameters)
 		self.copy_to(parameters)
-		logger.log("Switched to EMA weights")
+		if verbose:
+			logger.log("Switched to EMA weights")
 		try:
 			yield
 		finally:
 			self.restore(parameters)
-			logger.log("Restored training weights")
+			if verbose:
+				logger.log("Restored training weights")
 
 	def state_dict(self):
 		return dict(decay=self.decay, num_updates=self.num_updates,

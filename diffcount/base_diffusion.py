@@ -15,6 +15,9 @@ class BaseDiffusion:
 	def p_sample(self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None):
 		raise NotImplementedError
 	
+	def ddim_sample(self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None, eta=0.0,):
+		raise NotImplementedError
+
 	def p_sample_loop_progressive(
 		self,
 		model,
@@ -58,7 +61,7 @@ class BaseDiffusion:
 					denoised_fn=denoised_fn,
 					model_kwargs=model_kwargs,
 				)
-				yield out["sample"]
+				yield out
 				img = out["sample"]
 		
 	def p_sample_loop(
@@ -101,19 +104,7 @@ class BaseDiffusion:
 			progress=progress,
 		):
 			final = sample
-		return final
-	
-	def ddim_sample(
-		self,
-		model,
-		x,
-		t,
-		clip_denoised=True,
-		denoised_fn=None,
-		model_kwargs=None,
-		eta=0.0,
-	):
-		raise NotImplementedError
+		return final["sample"]
 	
 	def ddim_sample_loop_progressive(
 		self,
@@ -157,7 +148,7 @@ class BaseDiffusion:
 					model_kwargs=model_kwargs,
 					eta=eta,
 				)
-				yield out["sample"]
+				yield out
 				img = out["sample"]
 	
 	def ddim_sample_loop(
@@ -190,4 +181,4 @@ class BaseDiffusion:
 			eta=eta,
 		):
 			final = sample
-		return final
+		return final["sample"]
