@@ -1,0 +1,102 @@
+###################################################   Variables   ##################################################
+define: &image_size 256
+define: &learn_sigma True
+
+###################################################    Config     ##################################################
+name: dd_unet_fsc
+diffusion:
+  schedule_sampler: "uniform"
+  type: "Denoise"
+  params:
+    diffusion_steps: 1000
+    noise_schedule: linear
+    learn_sigma: *learn_sigma
+    sigma_small: False
+    use_kl: False
+    predict_xstart: False
+    rescale_timesteps: False
+    rescale_learned_sigmas: False
+    timestep_respacing: ""
+    lmbd_vlb: 0.001
+    lmbd_count: 0.005
+    t_count_weighting_scheme: "exp"
+    pred_count_from_xstart: True
+
+model:
+  type: "UNet"
+  params:
+    image_size: *image_size
+    in_channels: 4
+    model_channels: 192
+    out_channels: 1
+    num_res_blocks: 2
+    attention_resolutions: [32, 16, 8]
+    dropout: 0.0
+    channel_mult: null
+    conv_resample: True
+    dims: 2
+    y_dim: null
+    context_dim: 256
+    use_checkpoint: True
+    num_heads: -1
+    num_head_channels: 64
+    num_heads_upsample: -1
+    use_scale_shift_norm: True
+    resblock_updown: True
+    adalnzero: False
+    learn_count: False
+    learn_sigma: *learn_sigma
+
+conditioner:
+  embedders:
+    - type: "ImageConcatEmbedder"
+      input_keys: ["img"]
+      is_trainable: False
+
+    - type: "ViTExemplarEmbedder"
+      input_keys: ["img", "bboxes"]
+      is_trainable: True
+      params:
+        image_size: *image_size
+        out_channels: 256
+        vit_size: "B"
+        freeze_backbone: False
+        remove_sequence_dim: False
+
+data:
+  dataset:
+    name: "FSC147"
+    params:
+      datadir: /d/hpc/projects/FRI/DL/gs1121/FSC147_384_V2/
+      targetdir: densitymaps/exp1/
+      n_exemplars: 3
+      image_size: *image_size
+      tile_size: *image_size
+      hflip_p: 0.5
+      cj_p: 0.0
+      sigma: 0.5
+      clear_cache: False
+
+  dataloader:
+    params:
+      batch_size: 8
+      overfit_single_batch: False
+
+train:
+  lr: 1.5e-5
+  num_epochs: 0
+  grad_clip: -1.0
+  use_fp16: False
+  ema_rate: 0.9999
+  validation_interval: 5
+  resume_checkpoint: /d/hpc/projects/FRI/DL/gs1121/64_256_upsampler.pt
+  # resume_checkpoint: null
+  weight_decay: 0.0001
+  lr_scheduler: null
+  seed: 42
+
+log:
+  logdir: /d/hpc/projects/FRI/DL/gs1121/logs/
+  wandb_mode: online
+  log_interval: 100
+  save_interval: 100

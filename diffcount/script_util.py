@@ -11,6 +11,7 @@ import diffcount.conditioning as cond
 
 
 def assert_config(config):
+	#todo assert sequence dim and conditioning type match
 	for att in ["model", "diffusion", "data", "log"]:
 		assert hasattr(config, att), f"config missing attribute: {att}"
 	assert not (config.model.params.learn_count and config.diffusion.params.pred_count_from_xstart), (
@@ -234,7 +235,7 @@ def create_unet_model(
 		else:
 			raise ValueError(f"unsupported image size: {image_size}")
 	else:
-		channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
+		channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult)
 
 	attention_ds = []
 	for res in attention_resolutions:

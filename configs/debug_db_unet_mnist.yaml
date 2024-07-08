@@ -1,0 +1,87 @@
+###################################################   Variables   ##################################################
+define: &image_size 28
+define: &learn_sigma True
+
+###################################################    Config     ##################################################
+name: debug_db_unet_mnist
+diffusion:
+  schedule_sampler: "uniform"
+  type: "Denoise" # or Deblur
+  params:
+    diffusion_steps: 250
+    noise_schedule: linear
+    learn_sigma: *learn_sigma
+    sigma_small: False
+    use_kl: False
+    predict_xstart: False
+    rescale_timesteps: False
+    rescale_learned_sigmas: False
+    timestep_respacing: ""
+    lmbd_vlb: 0.001
+    lmbd_count: 0.005
+    t_count_weighting_scheme: "exp"
+    pred_count_from_xstart: True
+
+model:
+  type: "UNet" # or DiT
+  params:
+    image_size: *image_size
+    in_channels: 1
+    model_channels: 32
+    out_channels: 1
+    num_res_blocks: 2
+    attention_resolutions: [32, 16, 8]
+    dropout: 0.0
+    channel_mult: [1, 2, 2]
+    conv_resample: True
+    dims: 2
+    y_dim: 192
+    context_dim: null
+    use_checkpoint: True
+    num_heads: 1
+    num_head_channels: -1
+    num_heads_upsample: -1
+    use_scale_shift_norm: True
+    resblock_updown: True
+    adalnzero: False
+    learn_count: False
+    learn_sigma: *learn_sigma
+
+conditioner:
+  embedders:
+    - type: "ClassEmbedder"
+      input_keys: ["cls"]
+      is_trainable: True
+      params:
+        embed_dim: 192
+        n_classes: 10
+        add_sequence_dim: False
+
+data:
+  dataset:
+    name: "MNIST"
+    params:
+      datadir: ../.data/mnist
+
+  dataloader:
+    params:
+      batch_size: 4
+      overfit_single_batch: True
+
+train:
+  lr: 2.e-4
+  num_epochs: 10000
+  grad_clip: 1.0
+  use_fp16: False
+  ema_rate: 0.9999
+  validation_interval: 200
+  resume_checkpoint: null
+  weight_decay: 0.0
+  lr_scheduler: null
+  seed: 42
+
+log:
+  logdir: ../experiments/dummy/
+  wandb_mode: disabled
+  log_interval: 100
+  save_interval: 10000

@@ -1,24 +1,31 @@
-name: exp1
-seed: 42
+###################################################   Variables   ##################################################
+define: &image_size 256
+define: &learn_sigma True
 
+###################################################    Config     ##################################################
+name: debug_dd_unet_fsc
 diffusion:
   schedule_sampler: "uniform"
   type: "Denoise" # or Deblur
   params:
     diffusion_steps: 250
     noise_schedule: linear
-    learn_sigma: False
+    learn_sigma: *learn_sigma
     sigma_small: False
     use_kl: False
     predict_xstart: False
     rescale_timesteps: False
     rescale_learned_sigmas: False
     timestep_respacing: ""
+    lmbd_vlb: 0.001
+    lmbd_count: 0.005
+    t_count_weighting_scheme: "exp"
+    pred_count_from_xstart: True
 
 model:
   type: "UNet" # or DiT
   params:
-    image_size: 128
+    image_size: *image_size
     in_channels: 4
     model_channels: 32
     out_channels: 1
@@ -28,24 +35,33 @@ model:
     channel_mult: null
     conv_resample: True
     dims: 2
-    y_dim: null
-    context_dim: 64
+    y_dim: 192
+    context_dim: null
     use_checkpoint: True
     num_heads: 1
     num_head_channels: -1
     num_heads_upsample: -1
     use_scale_shift_norm: True
     resblock_updown: True
+    adalnzero: False
+    learn_count: False
+    learn_sigma: *learn_sigma
 
 conditioner:
-  type: "FSC147"
-  params:
-    image_size: 128
-    out_channels: 64
-    vit_size: "B"
-    freeze_backbone: True
-    remove_sequence_dim: False
-    is_trainable: False
+  embedders:
+    - type: "ImageConcatEmbedder"
+      input_keys: ["img"]
+      is_trainable: False
+
+    - type: "ViTExemplarEmbedder"
+      input_keys: ["img", "bboxes"]
+      is_trainable: True
+      params:
+        image_size: *image_size
+        out_channels: 64
+        vit_size: "B"
+        freeze_backbone: False
+        remove_sequence_dim: True
 
 data:
   dataset:
@@ -54,8 +70,8 @@ data:
       datadir: ../FSC147_384_V2/
       targetdir: densitymaps/exp1/
       n_exemplars: 3
-      image_size: 128
-      tile_size: 128
+      image_size: *image_size
+      tile_size: 64
       hflip_p: 0.5
       cj_p: 0.0
       sigma: 0.5
@@ -66,15 +82,16 @@ data:
       overfit_single_batch: True
 
 train:
-  lr: 1.e-4
+  lr: 1.e-5
   num_epochs: 10000
-  dropout: 0.0
-  grad_clip: 1.0
+  grad_clip: -1.0
   use_fp16: False
   ema_rate: 0.9999
-  validation_interval: 1000
+  validation_interval: 200
   resume_checkpoint: null
   weight_decay: 0.0
+  lr_scheduler: null
+  seed: 42
 
 log:
   logdir: ../experiments/dummy/
