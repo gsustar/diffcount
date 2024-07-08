@@ -1,7 +1,6 @@
 import argparse
 import torch as th
 import os.path as osp
-import os
 
 from diffcount import logger
 from diffcount.ema import ExponentialMovingAverage
@@ -9,8 +8,10 @@ from diffcount.plot_utils import draw_result
 from diffcount.count import pmax_threshold_count
 from diffcount.train_util import torch_to
 from diffcount.script_util import (
-	create_model_and_diffusion,
-	create_data_and_conditioner,
+	create_model,
+	create_diffusion,
+	create_data,
+	create_conditioner,
 	parse_config,
 )
 
@@ -33,38 +34,35 @@ def main():
 		use_ddim = True
 		config.diffusion.params.timestep_respacing = f"ddim{args.ddim_steps}"
 	
-	logger.log("creating model and diffusion...")
-	model, diffusion = create_model_and_diffusion(
-		config.model, 
-		config.diffusion
-	)
+	logger.log("creating model...")
+	model = create_model(config.model)
 	model.to(dev)
 	model.load_state_dict(ckpt["model"])
+	model.eval()
 
-	config_conditioner = None
-	if hasattr(config, "conditioner"):
-		config_conditioner = config.conditioner
-	config_conditioner.params.is_trainable = False
+	logger.log("creating diffusion...")
+	diffusion = create_diffusion(config.diffusion)
+
+	logger.log("creating dataloader...")
 	config.data.dataloader.params.overfit_single_batch = False
 	config.data.dataloader.params.batch_size = args.batch_size
+	_, val_data, test_data = create_data(config.data, train=False)
 
-	logger.log("creating data loader and conditioner...")
-	_, val_data, test_data, conditioner = create_data_and_conditioner(
-		config.data, 
-		config_conditioner,
+	logger.log("creating conditioner...")
+	conditioner = create_conditioner(
+		getattr(config, "conditioner", []),
 		train=False
 	)
 	conditioner.to(dev)
 	conditioner.load_state_dict(ckpt["conditioner"])
+	conditioner.eval()
 
+	logger.log("creating EMA...")
 	ema = ExponentialMovingAverage(
 		model.parameters(),
 		decay=config.train.ema_rate
 	)
 	ema.load_state_dict(ckpt["ema"])
-
-	model.eval()
-	conditioner.eval()
 
 	RMSE = {"val": 0.0, "test": 0.0}
 	MAE = {"val": 0.0, "test": 0.0}

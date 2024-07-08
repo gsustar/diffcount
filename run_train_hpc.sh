@@ -8,7 +8,6 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-gpu=32G
 #SBATCH --partition=gpu
-#SBATCH --constraint=h100
 #SBATCH --signal=SIGTERM@300
 
 export WANDB__SERVICE_WAIT=300

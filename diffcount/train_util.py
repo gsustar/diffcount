@@ -63,8 +63,6 @@ class TrainLoop:
 
 		self.step = 0
 		self.epoch = 0
-		# self.resume_step = 0
-		# self.resume_epoch = 0
 
 		self.conditioner = conditioner
 		self.opt = self.configure_optimizer()
@@ -96,11 +94,6 @@ class TrainLoop:
 		self.step = checkpoint.get("step", 0)
 		self.epoch = checkpoint.get("epoch", 0)
 
-		# self_model_state_dict = self.model.state_dict()
-		# model_state_dict = {
-		# 	k:v for k,v in model_state_dict.items() 
-		# 	if k in self_model_state_dict and v.shape==self_model_state_dict[k].shape
-		# }
 		msd = dict()
 		self_msd = self.model.state_dict()
 		for k, v in model_state_dict.items():
@@ -183,7 +176,6 @@ class TrainLoop:
 		log_loss_dict(
 			self.diffusion, t, {k: v * weights for k, v in losses.items()}
 		)
-		# logger.logkv("step", self.step + self.resume_step)
 		logger.logkv("step", self.step)
 		logger.logkv("epoch", self.epoch)
 		logger.logkv("lr", self.opt.param_groups[0]["lr"])

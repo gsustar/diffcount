@@ -1,4 +1,5 @@
 import yaml
+import importlib
 from types import SimpleNamespace
 from . import denoise_diffusion as dd
 from . import deblur_diffusion as bd
@@ -6,54 +7,47 @@ from .datasets import FSC147, MNIST, load_data
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
 from .dit import DiT_models
-from .conditioning import Conditioner, ClassEmbedder, ImageConcatEmbedder, ViTExemplarEmbedder
+import diffcount.conditioning as cond
 
 
-def create_model_and_diffusion(
-	model_config, 
-	diffusion_config
-):	
-	assert not model_config.params.learn_count and diffusion_config.params.pred_count_from_xstart, (
+def assert_config(config):
+	for att in ["model", "diffusion", "data", "log"]:
+		assert hasattr(config, att), f"config missing attribute: {att}"
+	assert not (config.model.params.learn_count and config.diffusion.params.pred_count_from_xstart), (
 		"learn_count and pred_count_from_xstart cannot both be True."
 	)
-	if diffusion_config.type == "Deblur":
-		learn_sigma = False
-		# assert not hasattr(diffusion_config.params, "learn_sigma"), "learn_sigma is not supported for Deblur diffusion."
-		diffusion = create_deblur_diffusion(
-			**vars(diffusion_config.params)
+	assert not hasattr(config.data.dataset.params, "split")
+	for embconf in config.conditioner.embedders:
+		assert hasattr(embconf, "input_keys"), (
+			"input_keys must be specified for each conditioner."
 		)
-	elif diffusion_config.type == "Denoise":
-		learn_sigma = diffusion_config.params.learn_sigma
-		diffusion = create_denoise_diffusion(
-			**vars(diffusion_config.params),
+	if config.diffusion.type == "Deblur":
+		assert not hasattr(config.diffusion.params, "learn_sigma"), (
+			"learn_sigma is not supported for Deblur diffusion."
 		)
-	else:
-		raise ValueError(f"Unsupported diffusion type: {diffusion_config.type}")
 
-	# if hasattr(model_config.params, "learn_sigma"):
-	# 	delattr(model_config.params, "learn_sigma")
 
+def create_model(model_config):
 	if model_config.type == "UNet":
-		model = create_unet_model(
-			learn_sigma=learn_sigma,
-			**vars(model_config.params)
-		)
+		model = create_unet_model(**vars(model_config.params))
 	elif model_config.type == "DiT":
-		model = create_dit_model(
-			learn_sigma=learn_sigma,
-			**vars(model_config.params),
-		)
+		model = create_dit_model(**vars(model_config.params))
 	else:
 		raise ValueError(f"Unsupported model type: {model_config.type}")
-	
-	return model, diffusion
+	return model
 
 
-def create_data_and_conditioner(
-	data_config,
-	conditioner_config,
-	train,
-):
+def create_diffusion(diffusion_config):
+	if diffusion_config.type == "Deblur":
+		diffusion = create_deblur_diffusion(**vars(diffusion_config.params))
+	elif diffusion_config.type == "Denoise":
+		diffusion = create_denoise_diffusion(**vars(diffusion_config.params),)
+	else:
+		raise ValueError(f"Unsupported diffusion type: {diffusion_config.type}")
+	return diffusion
+
+
+def create_data(data_config, train=True):
 	splits = ['train', 'val', None] if train else [None, 'val', 'test']
 	if data_config.dataset.name == "FSC147":
 		train_dataset, val_dataset, test_dataset = (
@@ -62,7 +56,6 @@ def create_data_and_conditioner(
 				split=split
 			) if split else None for split in splits
 		)
-		create_conditioner_fn = create_fsc147_conditioner
 	elif data_config.dataset.name == "MNIST":
 		train_dataset, val_dataset, test_dataset = (
 			MNIST(
@@ -70,17 +63,9 @@ def create_data_and_conditioner(
 				split=split,
 			) if split else None for split in splits
 		)
-		create_conditioner_fn = create_mnist_conditioner
 	else:
 		raise ValueError(f"Unknown dataset: {data_config.dataset}")
 	
-	if conditioner_config is not None:
-		conditioner = create_conditioner_fn(
-			**vars(conditioner_config.params)
-		)
-	else:
-		conditioner = create_empty_conditioner()
-
 	if train:
 		train_data = load_data(
 			dataset=train_dataset,
@@ -103,7 +88,116 @@ def create_data_and_conditioner(
 		shuffle=False,
 	) if not data_config.dataloader.params.overfit_single_batch else train_data
 
-	return train_data, val_data, test_data, conditioner
+	return train_data, val_data, test_data
+
+
+def create_conditioner(conditioner_config, train=True):
+	embedders = []
+	for embconf in conditioner_config.embedders:
+		params = vars(embconf.params) if hasattr(embconf, "params") else {}
+		emb = getattr(cond, embconf.type)(**params)
+		emb.is_trainable = getattr(embconf, "is_trainable", False) if train else False
+		emb.ucg_rate = getattr(embconf, "ucg_rate", 0.0) if train else 0.0
+		emb.input_keys = embconf.input_keys
+		embedders.append(emb)
+	return cond.Conditioner(embedders)
+
+
+# def create_model_and_diffusion(
+# 	model_config, 
+# 	diffusion_config
+# ):	
+# 	assert not model_config.params.learn_count and diffusion_config.params.pred_count_from_xstart, (
+# 		"learn_count and pred_count_from_xstart cannot both be True."
+# 	)
+# 	if diffusion_config.type == "Deblur":
+# 		learn_sigma = False
+# 		# assert not hasattr(diffusion_config.params, "learn_sigma"), "learn_sigma is not supported for Deblur diffusion."
+# 		diffusion = create_deblur_diffusion(
+# 			**vars(diffusion_config.params)
+# 		)
+# 	elif diffusion_config.type == "Denoise":
+# 		learn_sigma = diffusion_config.params.learn_sigma
+# 		diffusion = create_denoise_diffusion(
+# 			**vars(diffusion_config.params),
+# 		)
+# 	else:
+# 		raise ValueError(f"Unsupported diffusion type: {diffusion_config.type}")
+
+# 	# if hasattr(model_config.params, "learn_sigma"):
+# 	# 	delattr(model_config.params, "learn_sigma")
+
+# 	if model_config.type == "UNet":
+# 		model = create_unet_model(
+# 			learn_sigma=learn_sigma,
+# 			**vars(model_config.params)
+# 		)
+# 	elif model_config.type == "DiT":
+# 		model = create_dit_model(
+# 			learn_sigma=learn_sigma,
+# 			**vars(model_config.params),
+# 		)
+# 	else:
+# 		raise ValueError(f"Unsupported model type: {model_config.type}")
+	
+# 	return model, diffusion
+
+
+# def create_data_and_conditioner(
+# 	data_config,
+# 	conditioner_config,
+# 	train,
+# ):
+# 	splits = ['train', 'val', None] if train else [None, 'val', 'test']
+# 	if data_config.dataset.name == "FSC147":
+# 		train_dataset, val_dataset, test_dataset = (
+# 			FSC147(
+# 				**vars(data_config.dataset.params),
+# 				split=split
+# 			) if split else None for split in splits
+# 		)
+# 		create_conditioner_fn = create_fsc147_conditioner
+# 	elif data_config.dataset.name == "MNIST":
+# 		train_dataset, val_dataset, test_dataset = (
+# 			MNIST(
+# 				**vars(data_config.dataset.params),
+# 				split=split,
+# 			) if split else None for split in splits
+# 		)
+# 		create_conditioner_fn = create_mnist_conditioner
+# 	else:
+# 		raise ValueError(f"Unknown dataset: {data_config.dataset}")
+	
+# 	if conditioner_config is not None:
+# 		conditioner = create_conditioner_fn(
+# 			**vars(conditioner_config.params)
+# 		)
+# 	else:
+# 		conditioner = create_empty_conditioner()
+
+# 	if train:
+# 		train_data = load_data(
+# 			dataset=train_dataset,
+# 			batch_size=data_config.dataloader.params.batch_size,
+# 			shuffle=True,
+# 			overfit_single_batch=data_config.dataloader.params.overfit_single_batch,
+# 		)
+# 		test_data = None
+# 	else:
+# 		test_data = load_data(
+# 			dataset=test_dataset,
+# 			batch_size=data_config.dataloader.params.batch_size,
+# 			shuffle=False,
+# 		)
+# 		train_data = None
+	
+# 	val_data = load_data(
+# 		dataset=val_dataset,
+# 		batch_size=data_config.dataloader.params.batch_size,
+# 		shuffle=False,
+# 	) if not data_config.dataloader.params.overfit_single_batch else train_data
+
+# 	return train_data, val_data, test_data, conditioner
 
 def create_unet_model(
 	image_size,
@@ -270,44 +364,44 @@ def create_dit_model(
 	return model
 
 
-def create_empty_conditioner():
-	return Conditioner([])
+# def create_empty_conditioner():
+# 	return Conditioner([])
 
 
-def create_mnist_conditioner(
-	embed_dim,
-	is_trainable,
-	add_sequence_dim,
-):
-	return Conditioner([
-		ClassEmbedder(
-			embed_dim=embed_dim, 
-			is_trainable=is_trainable, 
-			n_classes=10, 
-			add_sequence_dim=add_sequence_dim
-		)
-	])
+# def create_mnist_conditioner(
+# 	embed_dim,
+# 	is_trainable,
+# 	add_sequence_dim,
+# ):
+# 	return Conditioner([
+# 		ClassEmbedder(
+# 			embed_dim=embed_dim, 
+# 			is_trainable=is_trainable, 
+# 			n_classes=10, 
+# 			add_sequence_dim=add_sequence_dim
+# 		)
+# 	])
 
 
-def create_fsc147_conditioner(
-	image_size,
-	out_channels,
-	vit_size,
-	freeze_backbone,
-	remove_sequence_dim,
-	is_trainable,
-):
-	return Conditioner([
-		ImageConcatEmbedder(),
-		ViTExemplarEmbedder(
-			image_size=image_size,
-			out_channels=out_channels,
-			vit_size=vit_size,
-			is_trainable=is_trainable,
-			remove_sequence_dim=remove_sequence_dim,
-			freeze_backbone=freeze_backbone,
-		)
-	])
+# def create_fsc147_conditioner(
+# 	image_size,
+# 	out_channels,
+# 	vit_size,
+# 	freeze_backbone,
+# 	remove_sequence_dim,
+# 	is_trainable,
+# ):
+# 	return Conditioner([
+# 		ImageConcatEmbedder(),
+# 		ViTExemplarEmbedder(
+# 			image_size=image_size,
+# 			out_channels=out_channels,
+# 			vit_size=vit_size,
+# 			is_trainable=is_trainable,
+# 			remove_sequence_dim=remove_sequence_dim,
+# 			freeze_backbone=freeze_backbone,
+# 		)
+# 	])
 
 
 def create_deblur_diffusion(
@@ -321,8 +415,6 @@ def create_deblur_diffusion(
 	delta,
 ):	
 	blur_schedule = bd.get_named_blur_schedule(blur_schedule, diffusion_steps, min_sigma, max_sigma)
-
-	#TODO Add support for spaced diffusion
 	return bd.DeblurDiffusion(
 		blur_sigmas=blur_schedule,
 		image_size=image_size,
@@ -384,13 +476,16 @@ def dict_to_namespace(d):
 	x = SimpleNamespace()
 	_ = [setattr(x, k,
 				 dict_to_namespace(v) if isinstance(v, dict)
+				 else [dict_to_namespace(e) if isinstance(e, dict) else e for e in v] if isinstance(v, list)
 				 else v) for k, v in d.items()]
 	return x
 
 
 def namespace_to_dict(namespace):
     return {
-        k: namespace_to_dict(v) if isinstance(v, SimpleNamespace) else v
+        k: namespace_to_dict(v) if isinstance(v, SimpleNamespace) 
+		else [namespace_to_dict(e) if isinstance(e, SimpleNamespace) else e for e in v] if isinstance(v, list)
+		else v
         for k, v in vars(namespace).items()
     }
 

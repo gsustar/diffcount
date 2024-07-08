@@ -9,10 +9,13 @@ import torch as th
 from diffcount import logger
 from diffcount.resample import create_named_schedule_sampler
 from diffcount.script_util import (
-	create_model_and_diffusion,
-	create_data_and_conditioner,
+	create_model,
+	create_diffusion,
+	create_data,
+	create_conditioner,
 	namespace_to_dict,
 	parse_config,
+	assert_config,
 )
 from diffcount.train_util import TrainLoop
 from diffcount.deblur_diffusion import DeblurDiffusion
@@ -21,6 +24,7 @@ def main():
 
 	args = parse_args()
 	config = parse_config(args.config)
+	assert_config(config)
 	now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
 	config.log.logdir = osp.join(
@@ -43,29 +47,28 @@ def main():
 		log_suffix='_train'
 	)
 	shutil.copy(args.config, osp.join(logger.get_dir(), "config.yaml"))
-
 	logger.log(pprint.pformat(config))
-	logger.log("creating model and diffusion...")
-	model, diffusion = create_model_and_diffusion(
-		config.model, 
-		config.diffusion
-	)
+
+	# todo preprocess dataset here
+	# todo create density maps here
+
+	logger.log("creating model...")
+	model = create_model(config.model)
 
 	dev = "cuda" if th.cuda.is_available() else "cpu"
 	logger.log(f"moving model to '{dev}'...")
 	model.to(dev)
+
+	logger.log("creating diffusion...")
+	diffusion = create_diffusion(config.diffusion)
 	schedule_sampler = create_named_schedule_sampler(config.diffusion.schedule_sampler, diffusion)
 
-	logger.log("creating data loader and conditioner...")
-	config_conditioner = None
-	if hasattr(config, "conditioner"):
-		assert config.conditioner.type == config.data.dataset.name, \
-				"conditioner type must match dataset"
-		config_conditioner = config.conditioner
-	train_data, val_data, _, conditioner = create_data_and_conditioner(
-		config.data, 
-		config_conditioner,
-		train=True
+	logger.log("creating dataloader...")
+	train_data, val_data, _ = create_data(config.data, train=True)
+
+	logger.log("creating conditioner...")
+	conditioner = create_conditioner(
+		getattr(config, "conditioner", [])
 	)
 	conditioner.to(dev)
 

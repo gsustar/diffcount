@@ -1,6 +1,5 @@
 
 # TODO classifier-free guidance -> figure out how to null image embedding looks like
-
 import torch as th
 import torch.nn as nn
 
@@ -8,27 +7,15 @@ from contextlib import nullcontext
 from functools import partial
 from itertools import chain
 
-# todo move this inside class
-from detectron2.modeling import ViT, SimpleFeaturePyramid
-from detectron2.modeling.poolers import ROIPooler
-from detectron2.structures import Boxes
-from detectron2.checkpoint import DetectionCheckpointer
-
 from .nn import disabled_train, count_params
 
 
-VITDET_PRETRAINED_MODELS = {
-	"B": "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/mask_rcnn_vitdet_b/f325346929/model_final_61ccd1.pkl",
-	"L": "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/mask_rcnn_vitdet_l/f325599698/model_final_6146ed.pkl",
-	"H": "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/mask_rcnn_vitdet_h/f329145471/model_final_7224f1.pkl",
-}
-
-
 class AbstractEmbModel(nn.Module):
-	def __init__(self, input_keys, is_trainable=False):
+	def __init__(self):
 		super().__init__()
-		self.input_keys = input_keys
-		self.is_trainable = is_trainable
+		self.input_keys = None
+		self.ucg_rate = None
+		self.is_trainable = None
 
 
 class Conditioner(nn.Module):
@@ -77,11 +64,8 @@ class Conditioner(nn.Module):
 
 
 class ClassEmbedder(AbstractEmbModel):
-	def __init__(self, embed_dim, is_trainable=False, n_classes=10, add_sequence_dim=False):
-		super().__init__(
-			input_keys=["cls"], 
-			is_trainable=is_trainable
-		)
+	def __init__(self, embed_dim, n_classes=10, add_sequence_dim=False):
+		super().__init__()
 		self.embedding = nn.Embedding(n_classes, embed_dim)
 		self.n_classes = n_classes
 		self.add_sequence_dim = add_sequence_dim
@@ -95,16 +79,19 @@ class ClassEmbedder(AbstractEmbModel):
 
 class ImageConcatEmbedder(AbstractEmbModel):
 	def __init__(self):
-		super().__init__(
-			input_keys=["img"], 
-			is_trainable=False
-		)
+		super().__init__()
 
 	def forward(self, img):
 		return img
 
 
 class ViTExemplarEmbedder(AbstractEmbModel):
+
+	VITDET_PRETRAINED_MODELS = {
+		"B": "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/mask_rcnn_vitdet_b/f325346929/model_final_61ccd1.pkl",
+		"L": "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/mask_rcnn_vitdet_l/f325599698/model_final_6146ed.pkl",
+		"H": "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/mask_rcnn_vitdet_h/f329145471/model_final_7224f1.pkl",
+	}
 
 	def __init__(
 		self, 
@@ -113,12 +100,18 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		vit_size="B",
 		freeze_backbone=True,
 		remove_sequence_dim=False,
-		is_trainable=False
 	):
-		super().__init__(
-			input_keys=["img", "bboxes"], 
-			is_trainable=is_trainable
-		)
+		super().__init__()
+
+		try:
+			from detectron2.modeling import SimpleFeaturePyramid, ViT
+			from detectron2.structures import Boxes
+			from detectron2.checkpoint import DetectionCheckpointer
+			from detectron2.modeling.poolers import ROIPooler
+		except ImportError:
+			raise ImportError("detectron2 is required for ViTExemplarEmbedder")
+		self._Boxes = Boxes
+
 		self.image_size = image_size
 		self.remove_sequence_dim = remove_sequence_dim
 		if vit_size == "B":
@@ -183,7 +176,7 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		self.fc1 = nn.Linear(256 * 7**2, out_channels) # vit_out_channels * roi_output_size^2
 
 		checkpointer = DetectionCheckpointer(self)
-		checkpointer.load(VITDET_PRETRAINED_MODELS[vit_size])
+		checkpointer.load(ViTExemplarEmbedder.VITDET_PRETRAINED_MODELS[vit_size])
 
 		if freeze_backbone:
 			self.backbone.train = disabled_train
@@ -194,7 +187,7 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 	def forward(self, img, bboxes):
 		# TODO when n_exemplars is 0 this will fail - fix
 		batch_size, n_exemplars = bboxes.shape[0], bboxes.shape[1]
-		bbs = [Boxes(bb).to(img.device) for bb in bboxes]
+		bbs = [self._Boxes(bb).to(img.device) for bb in bboxes]
 		fpn = self.backbone(img)
 		fpn = list(fpn.values())
 
@@ -207,6 +200,14 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 			x = x.reshape(batch_size, -1)
 		
 		return x
+
+
+class VAEExemplarEmbedder(AbstractEmbModel):
+	def __init__(self):
+		pass
+
+	def forward(self, img, bboxes):
+		pass
 
 
 class YOLOExemplarEmbedder(AbstractEmbModel):

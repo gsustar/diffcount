@@ -628,7 +628,8 @@ class DenoiseDiffusion(BaseDiffusion):
 						pred_xstart = self._predict_xstart_from_xprev(x_t, t, model_output)
 					else:
 						raise NotImplementedError(self.model_mean_type)
-				model_count = pmax_threshold_count(pred_xstart)
+				# model_count = pmax_threshold_count(pred_xstart)
+				model_count = th.sum((pred_xstart + 1) / 2, dim=(1, 2, 3), keepdim=True)
 
 			terms["mse"] = mean_flat((target - model_output) ** 2)
 
