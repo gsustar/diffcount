@@ -3,10 +3,8 @@ import json
 import random
 import numpy as np
 import torch as th
-import shutil
 
 from PIL import Image
-from typing import Literal
 
 from scipy.ndimage import gaussian_filter
 
@@ -15,8 +13,6 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 
 from torch.utils.data import Dataset, DataLoader, Subset
-
-from . import logger
 
 
 class MNIST(Dataset):
@@ -49,7 +45,8 @@ class FSC147(Dataset):
 	def __init__(
 			self,
 			datadir,
-			split='train',
+			targetdir=None,
+			split="train",
 			n_exemplars=3,
 			image_size=256,
 			hflip_p=0.5,
@@ -72,20 +69,19 @@ class FSC147(Dataset):
 		with open(os.path.join(self.datadir, 'annotation_FSC147_384.json'), 'rb') as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
-		size_str = f"{image_size}x{image_size}" if image_size is not None else "384_VarV2"
-		sigma_str = f"sig{sigma}" if sigma is not None else "adaptive"
-		self.targetdir = os.path.join(
-			datadir, 
-			"densitymaps",
-			f"{sigma_str}_{size_str}"
-		)
-
-		if not os.path.exists(self.targetdir):
-			logger.log("generating density maps...")
+		if targetdir is None:
+			self.targetdir = os.path.join(
+				self.datadir,
+				"densitymaps", 
+				f"sig{str(sigma).replace('.', '')}size{image_size}"
+			)
 			os.makedirs(self.targetdir, exist_ok=True)
-			generate_density_maps(datadir=datadir, savedir=self.targetdir, sigma=sigma, size=image_size)
 		else:
-			logger.log("density maps with this dataset configuration already exist. skipping generation...")
+			self.targetdir = os.path.join(self.datadir, targetdir)
+
+		self.adaptive_dm = False
+		if os.path.basename(os.path.normpath(self.targetdir)) == "adaptive_382_VarV2":
+			self.adaptive_dm = True
 
 	# todo remove this here and deal with it later with resizer
 	# def pad(
@@ -120,6 +116,9 @@ class FSC147(Dataset):
 		rh = new_h / old_h
 		bboxes = bboxes * th.tensor([rw, rh, rw, rh])
 
+		# Normalize
+		img = F.normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
 		# Pad
 		# img = self.pad(img)
 
@@ -133,17 +132,24 @@ class FSC147(Dataset):
 
 			# RandomColorJitter
 			if th.rand(1) < self.cj_p:
-				img = transforms.ColorJitter(0.1, 0.1, 0.1, 0.1)(img)
+				img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)(img)
 
 		# Rescale to [-1, 1]
 		img = img * 2.0 - 1.0
 		return img, bboxes, hflip
 	
 
-	def target_transform(self, target, hflip=False):
+	def target_transform(self, target, hflip=False, resize=None):
 		target = F.to_tensor(target)
+
+		if resize is not None:
+			_sum = target.sum()
+			target = F.resize(target, resize, antialias=True)
+			target = target / target.sum() * _sum
+
 		if hflip:
 			target = F.hflip(target)
+		# target = self.pad(target)
 		target = target * 2.0 - 1.0
 		return target
 
@@ -179,8 +185,18 @@ class FSC147(Dataset):
 		points = self.annotations[self.img_names[index]]['points']
 		target_count = th.tensor(len(points), dtype=th.float32)
 		
-		target = np.load(npypath)
-		target = self.target_transform(target, hflip)
+		if os.path.exists(npypath):
+			target = np.load(npypath)
+		else:
+			target = self.generate_density_map(
+				src_size,
+				new_size,
+				points
+			)
+			np.save(npypath, target)
+
+		resize = new_size if self.adaptive_dm else None
+		target = self.target_transform(target, hflip, resize=resize)
 
 		return target, dict(bboxes=bboxes, img=img, count=target_count)
 

@@ -68,6 +68,7 @@ data:
     name: "FSC147"
     params:
       datadir: /d/hpc/projects/FRI/DL/gs1121/FSC147_384_V2/
+      targetdir: null
       n_exemplars: 3
       image_size: *image_size
       hflip_p: 0.5
