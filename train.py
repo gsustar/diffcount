@@ -49,9 +49,6 @@ def main():
 	shutil.copy(args.config, osp.join(logger.get_dir(), "config.yaml"))
 	logger.log(pprint.pformat(config))
 
-	# todo preprocess dataset here
-	# todo create density maps here
-
 	logger.log("creating model...")
 	model = create_model(config.model)
 
@@ -63,7 +60,7 @@ def main():
 	diffusion = create_diffusion(config.diffusion)
 	schedule_sampler = create_named_schedule_sampler(config.diffusion.schedule_sampler, diffusion)
 
-	logger.log("creating dataloader...")
+	logger.log("creating data...")
 	train_data, val_data, _ = create_data(config.data, train=True)
 
 	logger.log("creating conditioner...")

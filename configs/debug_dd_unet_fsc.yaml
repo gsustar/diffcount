@@ -68,10 +68,8 @@ data:
     name: "FSC147"
     params:
       datadir: ../FSC147_384_V2/
-      targetdir: densitymaps/exp1/
       n_exemplars: 3
       image_size: *image_size
-      tile_size: 64
       hflip_p: 0.5
       cj_p: 0.0
       sigma: 0.5

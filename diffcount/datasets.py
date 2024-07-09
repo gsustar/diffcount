@@ -45,51 +45,21 @@ class MNIST(Dataset):
 
 
 class FSC147(Dataset):
-	"""
-	:param datadir: root directory of the dataset.
-	:param targetdir: sub-directory where generated density maps will be stored.
-	:param split: 'train', 'val' or 'test'.
-	:param n_exemplars: Number of examplars
-
-	Make sure the datadir directory has the following structure:
-
-   datadir
-	├── images_384_VarV2
-	│       ├─ 2.jpg
-	│       ├─ 3.jpg
-	│       ├─ ...
-	│       └─ 7714.jpg
-	├── annotation_FSC147_384.json
-	├── Train_Test_Val_FSC_147.json                         
-	├── targetdir
-	│       ├─ 2.npy
-	│       ├─ 3.npy
-	│       ├─ ...
-	│       └─ 7714.npy
-	└── ImageClasses_FSC147.json	(optional)
-
-	"""
 
 	def __init__(
 			self,
-			datadir: str,
-			targetdir: str,
-			split: Literal['train', 'val', 'test'] = 'train',
-			n_exemplars: int = 3,
-			image_size: int = 256,
-			tile_size: int = 512,
-			hflip_p: float = 0.5,
-			cj_p: float = 0.8,
-			sigma: float = 0.5,
-			clear_cache: bool = True
+			datadir,
+			split='train',
+			n_exemplars=3,
+			image_size=256,
+			hflip_p=0.5,
+			cj_p=0.8,
+			sigma=0.5,
 	):
 		self.datadir = datadir
-		self.targetdir = os.path.join(self.datadir, targetdir)
 		self.split = split
 		self.n_exemplars = n_exemplars
-
 		self.image_size = image_size
-		self.tile_size = tile_size
 		self.hflip_p = hflip_p
 		self.cj_p = cj_p
 		self.sigma = sigma
@@ -102,31 +72,40 @@ class FSC147(Dataset):
 		with open(os.path.join(self.datadir, 'annotation_FSC147_384.json'), 'rb') as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
-		if clear_cache and not split in ['val', 'test']:
-			if os.path.exists(self.targetdir):
-				shutil.rmtree(self.targetdir)
-			os.makedirs(self.targetdir)
+		size_str = f"{image_size}x{image_size}" if image_size is not None else "384_VarV2"
+		sigma_str = f"sig{sigma}" if sigma is not None else "adaptive"
+		self.targetdir = os.path.join(
+			datadir, 
+			"densitymaps",
+			f"{sigma_str}_{size_str}"
+		)
+
+		if not os.path.exists(self.targetdir):
+			logger.log("generating density maps...")
+			os.makedirs(self.targetdir, exist_ok=True)
+			generate_density_maps(datadir=datadir, savedir=self.targetdir, sigma=sigma, size=image_size)
+		else:
+			logger.log("density maps with this dataset configuration already exist. skipping generation...")
 
 	# todo remove this here and deal with it later with resizer
-	def pad(
-		self,
-		img,
-		center=False,
-		value=0
-	):
-		"""
-		Zero-pad the image to be divisible by the tile size
-		"""
-		h, w = img.shape[-2:]
-		pad_h = (self.tile_size - h % self.tile_size) % self.tile_size
-		pad_w = (self.tile_size - w % self.tile_size) % self.tile_size
-		pad = [0, 0, pad_w, pad_h]
-		if center:
-			pad_b = pad_h // 2 + 1 if pad_h % 2 != 0 else pad_h // 2
-			pad_r = pad_w // 2 + 1 if pad_w % 2 != 0 else pad_w // 2
-			pad = [pad_w // 2, pad_h // 2, pad_r, pad_b]
-		return F.pad(img, pad, padding_mode='constant', fill=value)
-
+	# def pad(
+	# 	self,
+	# 	img,
+	# 	center=False,
+	# 	value=0
+	# ):
+	# 	"""
+	# 	Zero-pad the image to be divisible by the tile size
+	# 	"""
+	# 	h, w = img.shape[-2:]
+	# 	pad_h = (self.tile_size - h % self.tile_size) % self.tile_size
+	# 	pad_w = (self.tile_size - w % self.tile_size) % self.tile_size
+	# 	pad = [0, 0, pad_w, pad_h]
+	# 	if center:
+	# 		pad_b = pad_h // 2 + 1 if pad_h % 2 != 0 else pad_h // 2
+	# 		pad_r = pad_w // 2 + 1 if pad_w % 2 != 0 else pad_w // 2
+	# 		pad = [pad_w // 2, pad_h // 2, pad_r, pad_b]
+	# 	return F.pad(img, pad, padding_mode='constant', fill=value)
 
 	def transform(self, img, bboxes, split='train'):
 		# ToTensor
@@ -142,7 +121,7 @@ class FSC147(Dataset):
 		bboxes = bboxes * th.tensor([rw, rh, rw, rh])
 
 		# Pad
-		img = self.pad(img)
+		# img = self.pad(img)
 
 		hflip = False
 		if split == 'train':
@@ -154,38 +133,19 @@ class FSC147(Dataset):
 
 			# RandomColorJitter
 			if th.rand(1) < self.cj_p:
-				img = transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)(img)
+				img = transforms.ColorJitter(0.1, 0.1, 0.1, 0.1)(img)
 
 		# Rescale to [-1, 1]
 		img = img * 2.0 - 1.0
-		return img, bboxes, hflip, (new_w, new_h)
+		return img, bboxes, hflip
 	
 
 	def target_transform(self, target, hflip=False):
 		target = F.to_tensor(target)
 		if hflip:
 			target = F.hflip(target)
-		target = self.pad(target)
 		target = target * 2.0 - 1.0
 		return target
-
-
-	def generate_density_map(self, src_size, new_size, points):
-		w, h = src_size
-		new_w, new_h = new_size
-		rw, rh = new_w / w, new_h / h
-		bitmap = np.zeros((new_h, new_w), dtype=np.float32)
-		for point in points:
-			x, y = int(point[0] * rw)-1, int(point[1] * rh)-1
-			bitmap[y, x] = 1.0
-
-		density_map = gaussian_filter(
-			bitmap,
-			self.sigma,
-			truncate=3.0,
-			mode='constant'
-		)
-		return density_map
 
 
 	def __len__(self):
@@ -203,12 +163,11 @@ class FSC147(Dataset):
 				self.img_names[index]
 			)
 		).convert('RGB')
-		src_size = img.size # (w, h)
 
 		bboxes = th.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
 		assert len(bboxes) >= self.n_exemplars, f'Not enough examplars for image {self.img_names[index]}'
 		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)
-		img, bboxes, hflip, new_size = self.transform(img, bboxes, split=self.split)
+		img, bboxes, hflip = self.transform(img, bboxes, split=self.split)
 
 		bboxes = bboxes[th.randperm(bboxes.shape[0])]
 		bboxes = bboxes[:self.n_exemplars, ...]	# (x_min, y_min, x_max, y_max)
@@ -220,18 +179,50 @@ class FSC147(Dataset):
 		points = self.annotations[self.img_names[index]]['points']
 		target_count = th.tensor(len(points), dtype=th.float32)
 		
-		if os.path.exists(npypath):
-			target = np.load(npypath)
-		else:
-			target = self.generate_density_map(
-				src_size,
-				new_size,
-				points
-			)
-			np.save(npypath, target)
+		target = np.load(npypath)
 		target = self.target_transform(target, hflip)
 
 		return target, dict(bboxes=bboxes, img=img, count=target_count)
+
+
+def generate_density_maps(datadir, savedir, sigma=None, size=None, dtype=np.float32):
+	if sigma is None:
+		default_dirname = os.path.join(datadir, 'densitymaps', 'adaptive_384_VarV2')
+		for filename in os.listdir(default_dirname):
+			dm = np.load(default_dirname, filename)
+			_sum = dm.sum()
+			dm = F.resize(dm, (size, size), antialias=True)
+			dm = dm / dm.sum() * _sum
+			np.save(os.path.join(savedir, filename), dm)
+		return
+
+	with open(os.path.join(datadir, 'annotation_FSC147_384.json'), 'rb') as f:
+		annotations = json.load(f)
+		for img_name, ann in annotations.items():
+			w, h = Image.open(
+				os.path.join(
+					datadir,
+					'images_384_VarV2',
+					img_name
+				)
+			).size
+			new_w, new_h = (size, size) if size is not None else (w, h)
+			rw, rh = new_w / w, new_h / h
+			bitmap = np.zeros((new_h, new_w), dtype=dtype)
+			for point in ann['points']:
+				x, y = int(point[0] * rw)-1, int(point[1] * rh)-1
+				bitmap[y, x] = 1.0
+
+			density_map = gaussian_filter(
+				bitmap,
+				sigma,
+				truncate=3.0,
+				mode='constant'
+			)
+			np.save(
+				os.path.join(savedir, os.path.splitext(img_name)[0] + '.npy'), 
+				density_map
+			)
 
 
 def load_data(
