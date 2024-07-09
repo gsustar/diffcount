@@ -7,7 +7,7 @@ from . import denoise_diffusion as dd
 from . import deblur_diffusion as bd
 from . import conditioning as cond
 
-from .datasets import FSC147, MNIST, load_data, generate_density_maps
+from .datasets import FSC147, MNIST, load_data
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
 from .dit import DiT_models

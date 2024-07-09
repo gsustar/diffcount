@@ -103,6 +103,24 @@ class FSC147(Dataset):
 	# 		pad = [pad_w // 2, pad_h // 2, pad_r, pad_b]
 	# 	return F.pad(img, pad, padding_mode='constant', fill=value)
 
+	def generate_density_map(self, src_size, new_size, points):
+		w, h = src_size
+		new_w, new_h = new_size
+		rw, rh = new_w / w, new_h / h
+		bitmap = np.zeros((new_h, new_w), dtype=np.float32)
+		for point in points:
+			x, y = int(point[0] * rw)-1, int(point[1] * rh)-1
+			bitmap[y, x] = 1.0
+
+		density_map = gaussian_filter(
+			bitmap,
+			self.sigma,
+			truncate=3.0,
+			mode='constant'
+		)
+		return density_map
+
+
 	def transform(self, img, bboxes, split='train'):
 		# ToTensor
 		img = F.to_tensor(img) # (C, H, W)
@@ -136,7 +154,7 @@ class FSC147(Dataset):
 
 		# Rescale to [-1, 1]
 		img = img * 2.0 - 1.0
-		return img, bboxes, hflip
+		return img, bboxes, hflip, (new_w, new_h)
 	
 
 	def target_transform(self, target, hflip=False, resize=None):
@@ -169,11 +187,12 @@ class FSC147(Dataset):
 				self.img_names[index]
 			)
 		).convert('RGB')
+		src_size = img.size # (w, h)
 
 		bboxes = th.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
 		assert len(bboxes) >= self.n_exemplars, f'Not enough examplars for image {self.img_names[index]}'
 		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)
-		img, bboxes, hflip = self.transform(img, bboxes, split=self.split)
+		img, bboxes, hflip, new_size = self.transform(img, bboxes, split=self.split)
 
 		bboxes = bboxes[th.randperm(bboxes.shape[0])]
 		bboxes = bboxes[:self.n_exemplars, ...]	# (x_min, y_min, x_max, y_max)
@@ -199,46 +218,6 @@ class FSC147(Dataset):
 		target = self.target_transform(target, hflip, resize=resize)
 
 		return target, dict(bboxes=bboxes, img=img, count=target_count)
-
-
-def generate_density_maps(datadir, savedir, sigma=None, size=None, dtype=np.float32):
-	if sigma is None:
-		default_dirname = os.path.join(datadir, 'densitymaps', 'adaptive_384_VarV2')
-		for filename in os.listdir(default_dirname):
-			dm = np.load(default_dirname, filename)
-			_sum = dm.sum()
-			dm = F.resize(dm, (size, size), antialias=True)
-			dm = dm / dm.sum() * _sum
-			np.save(os.path.join(savedir, filename), dm)
-		return
-
-	with open(os.path.join(datadir, 'annotation_FSC147_384.json'), 'rb') as f:
-		annotations = json.load(f)
-		for img_name, ann in annotations.items():
-			w, h = Image.open(
-				os.path.join(
-					datadir,
-					'images_384_VarV2',
-					img_name
-				)
-			).size
-			new_w, new_h = (size, size) if size is not None else (w, h)
-			rw, rh = new_w / w, new_h / h
-			bitmap = np.zeros((new_h, new_w), dtype=dtype)
-			for point in ann['points']:
-				x, y = int(point[0] * rw)-1, int(point[1] * rh)-1
-				bitmap[y, x] = 1.0
-
-			density_map = gaussian_filter(
-				bitmap,
-				sigma,
-				truncate=3.0,
-				mode='constant'
-			)
-			np.save(
-				os.path.join(savedir, os.path.splitext(img_name)[0] + '.npy'), 
-				density_map
-			)
 
 
 def load_data(
