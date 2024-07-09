@@ -3,10 +3,8 @@ import json
 import random
 import numpy as np
 import torch as th
-import shutil
 
 from PIL import Image
-from typing import Literal
 
 from scipy.ndimage import gaussian_filter
 
@@ -15,8 +13,6 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 
 from torch.utils.data import Dataset, DataLoader, Subset
-
-from . import logger
 
 
 class MNIST(Dataset):
@@ -45,51 +41,22 @@ class MNIST(Dataset):
 
 
 class FSC147(Dataset):
-	"""
-	:param datadir: root directory of the dataset.
-	:param targetdir: sub-directory where generated density maps will be stored.
-	:param split: 'train', 'val' or 'test'.
-	:param n_exemplars: Number of examplars
-
-	Make sure the datadir directory has the following structure:
-
-   datadir
-	├── images_384_VarV2
-	│       ├─ 2.jpg
-	│       ├─ 3.jpg
-	│       ├─ ...
-	│       └─ 7714.jpg
-	├── annotation_FSC147_384.json
-	├── Train_Test_Val_FSC_147.json                         
-	├── targetdir
-	│       ├─ 2.npy
-	│       ├─ 3.npy
-	│       ├─ ...
-	│       └─ 7714.npy
-	└── ImageClasses_FSC147.json	(optional)
-
-	"""
 
 	def __init__(
 			self,
-			datadir: str,
-			targetdir: str,
-			split: Literal['train', 'val', 'test'] = 'train',
-			n_exemplars: int = 3,
-			image_size: int = 256,
-			tile_size: int = 512,
-			hflip_p: float = 0.5,
-			cj_p: float = 0.8,
-			sigma: float = 0.5,
-			clear_cache: bool = True
+			datadir,
+			targetdir=None,
+			split="train",
+			n_exemplars=3,
+			image_size=256,
+			hflip_p=0.5,
+			cj_p=0.8,
+			sigma=0.5,
 	):
 		self.datadir = datadir
-		self.targetdir = os.path.join(self.datadir, targetdir)
 		self.split = split
 		self.n_exemplars = n_exemplars
-
 		self.image_size = image_size
-		self.tile_size = tile_size
 		self.hflip_p = hflip_p
 		self.cj_p = cj_p
 		self.sigma = sigma
@@ -102,31 +69,39 @@ class FSC147(Dataset):
 		with open(os.path.join(self.datadir, 'annotation_FSC147_384.json'), 'rb') as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
-		if clear_cache and not split in ['val', 'test']:
-			if os.path.exists(self.targetdir):
-				shutil.rmtree(self.targetdir)
-			os.makedirs(self.targetdir)
+		if targetdir is None:
+			self.targetdir = os.path.join(
+				self.datadir,
+				"densitymaps", 
+				f"sig{str(sigma).replace('.', '')}size{image_size}"
+			)
+			os.makedirs(self.targetdir, exist_ok=True)
+		else:
+			self.targetdir = os.path.join(self.datadir, targetdir)
+
+		self.adaptive_dm = False
+		if os.path.basename(os.path.normpath(self.targetdir)) == "adaptive_382_VarV2":
+			self.adaptive_dm = True
 
 	# todo remove this here and deal with it later with resizer
-	def pad(
-		self,
-		img,
-		center=False,
-		value=0
-	):
-		"""
-		Zero-pad the image to be divisible by the tile size
-		"""
-		h, w = img.shape[-2:]
-		pad_h = (self.tile_size - h % self.tile_size) % self.tile_size
-		pad_w = (self.tile_size - w % self.tile_size) % self.tile_size
-		pad = [0, 0, pad_w, pad_h]
-		if center:
-			pad_b = pad_h // 2 + 1 if pad_h % 2 != 0 else pad_h // 2
-			pad_r = pad_w // 2 + 1 if pad_w % 2 != 0 else pad_w // 2
-			pad = [pad_w // 2, pad_h // 2, pad_r, pad_b]
-		return F.pad(img, pad, padding_mode='constant', fill=value)
-
+	# def pad(
+	# 	self,
+	# 	img,
+	# 	center=False,
+	# 	value=0
+	# ):
+	# 	"""
+	# 	Zero-pad the image to be divisible by the tile size
+	# 	"""
+	# 	h, w = img.shape[-2:]
+	# 	pad_h = (self.tile_size - h % self.tile_size) % self.tile_size
+	# 	pad_w = (self.tile_size - w % self.tile_size) % self.tile_size
+	# 	pad = [0, 0, pad_w, pad_h]
+	# 	if center:
+	# 		pad_b = pad_h // 2 + 1 if pad_h % 2 != 0 else pad_h // 2
+	# 		pad_r = pad_w // 2 + 1 if pad_w % 2 != 0 else pad_w // 2
+	# 		pad = [pad_w // 2, pad_h // 2, pad_r, pad_b]
+	# 	return F.pad(img, pad, padding_mode='constant', fill=value)
 
 	def transform(self, img, bboxes, split='train'):
 		# ToTensor
@@ -141,8 +116,11 @@ class FSC147(Dataset):
 		rh = new_h / old_h
 		bboxes = bboxes * th.tensor([rw, rh, rw, rh])
 
+		# Normalize
+		img = F.normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
 		# Pad
-		img = self.pad(img)
+		# img = self.pad(img)
 
 		hflip = False
 		if split == 'train':
@@ -154,18 +132,24 @@ class FSC147(Dataset):
 
 			# RandomColorJitter
 			if th.rand(1) < self.cj_p:
-				img = transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)(img)
+				img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)(img)
 
 		# Rescale to [-1, 1]
 		img = img * 2.0 - 1.0
 		return img, bboxes, hflip, (new_w, new_h)
 	
 
-	def target_transform(self, target, hflip=False):
+	def target_transform(self, target, hflip=False, resize=None):
 		target = F.to_tensor(target)
+
+		if resize is not None:
+			_sum = target.sum()
+			target = F.resize(target, resize, antialias=True)
+			target = target / target.sum() * _sum
+
 		if hflip:
 			target = F.hflip(target)
-		target = self.pad(target)
+		# target = self.pad(target)
 		target = target * 2.0 - 1.0
 		return target
 
@@ -229,7 +213,9 @@ class FSC147(Dataset):
 				points
 			)
 			np.save(npypath, target)
-		target = self.target_transform(target, hflip)
+
+		resize = new_size if self.adaptive_dm else None
+		target = self.target_transform(target, hflip, resize=resize)
 
 		return target, dict(bboxes=bboxes, img=img, count=target_count)
 
