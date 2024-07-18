@@ -17,15 +17,23 @@ def assert_config(config):
 	#todo assert sequence dim and conditioning type match
 	for att in ["model", "diffusion", "data", "log"]:
 		assert hasattr(config, att), f"config missing attribute: {att}"
+
+	# todo maybe remove
 	assert not (config.model.params.learn_count and config.diffusion.params.pred_count_from_xstart), (
 		"learn_count and pred_count_from_xstart cannot both be True."
 	)
+	assert config.model.params.learn_sigma == config.diffusion.params.learn_sigma
 	assert not hasattr(config.data.dataset.params, "split")
+
 	for embconf in config.conditioner.embedders:
 		assert hasattr(embconf, "input_keys"), (
 			"input_keys must be specified for each conditioner."
 		)
+
 	if config.diffusion.type == "Deblur":
+		assert not hasattr(config.diffusion, "vae"), (
+			"Deblur diffusion does not support latent encoding."
+		)
 		assert not hasattr(config.diffusion.params, "learn_sigma"), (
 			"learn_sigma is not supported for Deblur diffusion."
 		)
@@ -52,7 +60,8 @@ def create_diffusion(diffusion_config):
 
 
 def create_data(data_config, train=True):
-	splits = ['train', 'val', None] if train else [None, 'val', 'test']
+	#todo if keep original aspect ratio or image size, make sure the batch size is one
+	splits = ['train', 'train_val', None] if train else [None, 'test_val', 'test']
 	if data_config.dataset.name == "FSC147":
 		train_dataset, val_dataset, test_dataset = (
 			FSC147(
@@ -204,7 +213,7 @@ def create_conditioner(conditioner_config, train=True):
 # 	return train_data, val_data, test_data, conditioner
 
 def create_unet_model(
-	image_size,
+	input_size,
 	in_channels,
 	model_channels,
 	out_channels,
@@ -227,25 +236,25 @@ def create_unet_model(
 	adalnzero,
 ):
 	if channel_mult is None:
-		if image_size == 512:
+		if input_size == 512:
 			channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
-		elif image_size == 256:
+		elif input_size == 256:
 			channel_mult = (1, 1, 2, 2, 4, 4)
-		elif image_size == 128:
+		elif input_size == 128:
 			channel_mult = (1, 1, 2, 3, 4)
-		elif image_size == 64:
+		elif input_size == 64:
 			channel_mult = (1, 2, 3, 4)
 		else:
-			raise ValueError(f"unsupported image size: {image_size}")
+			raise ValueError(f"unsupported input size: {input_size}")
 	else:
 		channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult)
 
 	attention_ds = []
 	for res in attention_resolutions:
-		attention_ds.append(image_size // int(res))
+		attention_ds.append(input_size // int(res))
 
 	return UNetModel(
-		image_size=image_size,
+		# image_size=image_size,
 		in_channels=in_channels,
 		model_channels=model_channels,
 		out_channels=(out_channels if not learn_sigma else 2 * out_channels),
@@ -442,6 +451,7 @@ def create_denoise_diffusion(
 	lmbd_count,
 	t_count_weighting_scheme,
 	pred_count_from_xstart,
+	**wscheme_kwargs
 ):
 	betas = dd.get_named_beta_schedule(noise_schedule, diffusion_steps)
 	if use_kl:
@@ -473,6 +483,7 @@ def create_denoise_diffusion(
 		lmbd_count=lmbd_count,
 		t_count_weighting_scheme=t_count_weighting_scheme,
 		pred_count_from_xstart=pred_count_from_xstart,
+		**wscheme_kwargs
 	)
 
 

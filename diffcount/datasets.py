@@ -13,6 +13,13 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 
 from torch.utils.data import Dataset, DataLoader, Subset
+from .data_util import (
+	resize, 
+	resize_dm, 
+	pad, 
+	adjust_bboxes, 
+	scale_to_bbox
+)
 
 
 class MNIST(Dataset):
@@ -45,68 +52,54 @@ class FSC147(Dataset):
 	def __init__(
 			self,
 			datadir,
-			targetdir=None,
+			targetdir,
 			split="train",
 			n_exemplars=3,
-			image_size=256,
+			image_size=512,
 			hflip_p=0.5,
 			cj_p=0.8,
 			sigma=0.5,
+			center_pad=False,
+			bbox_max_size=None,
+			bbox_min_size=None,
+			allow_resize_target=False,
+			target_minmax_norm=False,
 	):
 		self.datadir = datadir
+		self.targetdir = targetdir
 		self.split = split
 		self.n_exemplars = n_exemplars
 		self.image_size = image_size
 		self.hflip_p = hflip_p
 		self.cj_p = cj_p
 		self.sigma = sigma
+		self.center_pad = center_pad
+		self.bbox_max_size = bbox_max_size
+		self.bbox_min_size = bbox_min_size
+		self.allow_resize_target = allow_resize_target
+		self.target_minmax_norm = target_minmax_norm
+
+		assert self.split in ["train", "train_val", "test_val", "test"]
 
 		self.img_names = None
 		with open(os.path.join(self.datadir, 'Train_Test_Val_FSC_147.json'), 'rb') as f:
-			self.img_names = json.load(f)[self.split]
+			_split = "val" if self.split in ["train_val", "test_val"] else self.split
+			self.img_names = json.load(f)[_split]
 
 		self.annotations = None
 		with open(os.path.join(self.datadir, 'annotation_FSC147_384.json'), 'rb') as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
-		if targetdir is None:
-			self.targetdir = os.path.join(
-				self.datadir,
-				"densitymaps", 
-				f"sig{str(sigma).replace('.', '')}size{image_size}"
-			)
-			os.makedirs(self.targetdir, exist_ok=True)
-		else:
-			self.targetdir = os.path.join(self.datadir, targetdir)
+		os.makedirs(
+			os.path.join(self.datadir, self.targetdir), 
+			exist_ok=True
+		)
 
-		self.adaptive_dm = False
-		if os.path.basename(os.path.normpath(self.targetdir)) == "adaptive_382_VarV2":
-			self.adaptive_dm = True
-
-	# todo remove this here and deal with it later with resizer
-	# def pad(
-	# 	self,
-	# 	img,
-	# 	center=False,
-	# 	value=0
-	# ):
-	# 	"""
-	# 	Zero-pad the image to be divisible by the tile size
-	# 	"""
-	# 	h, w = img.shape[-2:]
-	# 	pad_h = (self.tile_size - h % self.tile_size) % self.tile_size
-	# 	pad_w = (self.tile_size - w % self.tile_size) % self.tile_size
-	# 	pad = [0, 0, pad_w, pad_h]
-	# 	if center:
-	# 		pad_b = pad_h // 2 + 1 if pad_h % 2 != 0 else pad_h // 2
-	# 		pad_r = pad_w // 2 + 1 if pad_w % 2 != 0 else pad_w // 2
-	# 		pad = [pad_w // 2, pad_h // 2, pad_r, pad_b]
-	# 	return F.pad(img, pad, padding_mode='constant', fill=value)
 
 	def generate_density_map(self, src_size, new_size, points):
-		w, h = src_size
-		new_w, new_h = new_size
-		rw, rh = new_w / w, new_h / h
+		h, w = src_size
+		new_h, new_w = new_size
+		rh, rw = new_h / h, new_w / w
 		bitmap = np.zeros((new_h, new_w), dtype=np.float32)
 		for point in points:
 			x, y = int(point[0] * rw)-1, int(point[1] * rh)-1
@@ -121,53 +114,102 @@ class FSC147(Dataset):
 		return density_map
 
 
-	def transform(self, img, bboxes, split='train'):
+	def __train_val_transform(self, img, bboxes):
 		# ToTensor
 		img = F.to_tensor(img) # (C, H, W)
 
 		# Resize
-		old_h, old_w = img.shape[-2:]
-		img = F.resize(img, (self.image_size, self.image_size), antialias=True)
+		img, scale = resize(img, self.image_size)
+		bboxes = adjust_bboxes(bboxes, scale_factor=scale)
 
-		new_h, new_w = img.shape[-2:]
-		rw = new_w / old_w
-		rh = new_h / old_h
-		bboxes = bboxes * th.tensor([rw, rh, rw, rh])
-
-		# Normalize
-		img = F.normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+		# Scale to bboxes
+		img, scale = scale_to_bbox(img, bboxes, self.image_size, self.bbox_max_size, self.bbox_min_size)
+		new_size = img.shape[-2:]
 
 		# Pad
-		# img = self.pad(img)
+		img, padding = pad(img, self.image_size, center=self.center_pad)
+		bboxes = adjust_bboxes(bboxes, scale_factor=scale, padding=padding)
+		assert img.shape[-1] == img.shape[-2] == self.image_size
+		
+		img = img * 2.0 - 1.0
+		return img, bboxes, False, new_size
+
+
+	def __train_transform(self, img, bboxes):
+		# ToTensor
+		img = F.to_tensor(img) # (C, H, W)
+
+		# Resize
+		img, scale = resize(img, self.image_size)
+		bboxes = adjust_bboxes(bboxes, scale_factor=scale)
+
+		# Scale to bboxes
+		img, scale = scale_to_bbox(img, bboxes, self.image_size, self.bbox_max_size, self.bbox_min_size)
+		new_size = img.shape[-2:]
+
+		# Pad
+		img, padding = pad(img, self.image_size, center=self.center_pad)
+		bboxes = adjust_bboxes(bboxes, scale_factor=scale, padding=padding)
+		assert img.shape[-1] == img.shape[-2] == self.image_size
 
 		hflip = False
-		if split == 'train':
-			# RandomHorizontalFlip
-			if th.rand(1) < self.hflip_p:
-				img = F.hflip(img)
-				bboxes[:, [0, 2]] = self.image_size - bboxes[:, [2, 0]]
-				hflip = True
+		# RandomHorizontalFlip
+		if th.rand(1) < self.hflip_p:
+			img = F.hflip(img)
+			bboxes[:, [0, 2]] = self.image_size - bboxes[:, [2, 0]]
+			hflip = True
 
-			# RandomColorJitter
-			if th.rand(1) < self.cj_p:
-				img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)(img)
+		# RandomColorJitter
+		if th.rand(1) < self.cj_p:
+			img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)(img)
 
-		# Rescale to [-1, 1]
 		img = img * 2.0 - 1.0
-		return img, bboxes, hflip, (new_w, new_h)
+		return img, bboxes, hflip, new_size
+
+
+	def __test_transfrom(self, img, bboxes):
+		pass
+
+
+	def __test_val_transform(self, img, bboxes):
+		pass
+
+
+	def transform(self, img, bboxes, split):
+		if split == "train":
+			img, bboxes, hflip, new_size = self.__train_transform(img, bboxes)
+		elif split == "train_val":
+			img, bboxes, hflip, new_size = self.__train_val_transform(img, bboxes)
+		elif split == "test_val":
+			img, bboxes, hflip, new_size = self.__test_val_transform(img, bboxes)
+		elif split == "test":
+			img, bboxes, hflip, new_size = self.__test_transfrom(img, bboxes)
+		else:
+			raise ValueError(f"Unknown split '{split}'")
+		return img, bboxes, hflip, new_size
 	
 
-	def target_transform(self, target, hflip=False, resize=None):
+	def target_transform(self, target, hflip=False, target_size=None):
+		# ToTensor
 		target = F.to_tensor(target)
 
-		if resize is not None:
-			_sum = target.sum()
-			target = F.resize(target, resize, antialias=True)
-			target = target / target.sum() * _sum
+		# Resize if necessery
+		if target_size is not None and self.allow_resize_target:
+			target = resize_dm(target, target_size)
 
+		# Pad
+		target, _ = pad(target, self.image_size, center=self.center_pad)
+
+		# Horizontal flip
 		if hflip:
 			target = F.hflip(target)
-		# target = self.pad(target)
+
+		# MinMax Normalization
+		if self.target_minmax_norm:
+			_tmax = target.max()
+			_tmin = target.min()
+			target = (target - _tmin) / (_tmax - _tmin)
+
 		target = target * 2.0 - 1.0
 		return target
 
@@ -187,23 +229,28 @@ class FSC147(Dataset):
 				self.img_names[index]
 			)
 		).convert('RGB')
-		src_size = img.size # (w, h)
+		src_size = img.size[::-1]
 
-		bboxes = th.as_tensor(self.annotations[self.img_names[index]]['box_examples_coordinates'])
+		bboxes = th.as_tensor(
+			self.annotations[self.img_names[index]]['box_examples_coordinates'], 
+			dtype=th.float32
+		)
 		assert len(bboxes) >= self.n_exemplars, f'Not enough examplars for image {self.img_names[index]}'
-		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)
-		img, bboxes, hflip, new_size = self.transform(img, bboxes, split=self.split)
 
+		bboxes = bboxes[:, [0, 2], :].reshape(-1, 4)
 		bboxes = bboxes[th.randperm(bboxes.shape[0])]
 		bboxes = bboxes[:self.n_exemplars, ...]	# (x_min, y_min, x_max, y_max)
+		
+		points = self.annotations[self.img_names[index]]['points']
+		target_count = th.tensor(len(points), dtype=th.float32)
+
+		img, bboxes, hflip, new_size = self.transform(img, bboxes, split=self.split)
 
 		npypath = os.path.join(
+			self.datadir,
 			self.targetdir, 
 			os.path.splitext(self.img_names[index])[0] + '.npy'
 		)
-		points = self.annotations[self.img_names[index]]['points']
-		target_count = th.tensor(len(points), dtype=th.float32)
-		
 		if os.path.exists(npypath):
 			target = np.load(npypath)
 		else:
@@ -214,9 +261,12 @@ class FSC147(Dataset):
 			)
 			np.save(npypath, target)
 
-		resize = new_size if self.adaptive_dm else None
-		target = self.target_transform(target, hflip, resize=resize)
-
+		target = self.target_transform(
+			target,
+			hflip, 
+			target_size=new_size if self.allow_resize_target else None
+		)
+		assert target.shape[-2:] == img.shape[-2:], "target shape does not match image shape."
 		return target, dict(bboxes=bboxes, img=img, count=target_count)
 
 

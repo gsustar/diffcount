@@ -125,8 +125,9 @@ class DenoiseDiffusion(BaseDiffusion):
 		rescale_timesteps=False,
 		lmbd_vlb=0.001,
 		lmbd_count=0.0,
-		t_count_weighting_scheme="uniform",
 		pred_count_from_xstart=False,
+		t_count_weighting_scheme="uniform",
+		**wscheme_kwargs
 	):
 		self.model_mean_type = model_mean_type
 		self.model_var_type = model_var_type
@@ -181,13 +182,13 @@ class DenoiseDiffusion(BaseDiffusion):
 		self.lmbd_t = (1.0 - betas) * (1.0 - self.alphas_cumprod) / betas
 
 		if self.t_count_weighting_scheme == "p2":
-			k = 1.0
-			gamma = 0.5
+			k = wscheme_kwargs.get("k", 1.0)
+			gamma = wscheme_kwargs.get("gamma", 0.5)
 			p2 = self.lmbd_t / (k + self.snr) ** gamma
 			self.t_count_weights = (p2 - p2.min()) / (p2.max() - p2.min())
 
 		elif self.t_count_weighting_scheme == "exp":
-			k = 50.0
+			k = wscheme_kwargs.get("k", 25.0)
 			self.t_count_weights = 1 - (np.exp(-k * (np.arange(self.num_timesteps) / self.num_timesteps)) - 1) / (np.exp(-k) - 1)
 
 		elif self.t_count_weighting_scheme == "uniform":
@@ -634,7 +635,7 @@ class DenoiseDiffusion(BaseDiffusion):
 			terms["mse"] = mean_flat((target - model_output) ** 2)
 
 			lmbd_t_count = _extract_into_tensor(self.t_count_weights, t, target_count.shape)
-			if model_count is not None and target_count is not None:
+			if model_count is not None:
 				terms["count"] = self.lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
 
 			terms["loss"] = terms["mse"]

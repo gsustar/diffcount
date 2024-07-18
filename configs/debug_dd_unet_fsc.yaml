@@ -4,6 +4,8 @@ define: &learn_sigma True
 
 ###################################################    Config     ##################################################
 name: debug_dd_unet_fsc
+vae: "stabilityai/sdxl-vae"
+# vae: null
 diffusion:
   schedule_sampler: "uniform"
   type: "Denoise" # or Deblur
@@ -19,23 +21,24 @@ diffusion:
     timestep_respacing: ""
     lmbd_vlb: 0.001
     lmbd_count: 0.005
+    pred_count_from_xstart: False
     t_count_weighting_scheme: "exp"
-    pred_count_from_xstart: True
+    k: 25.0
 
 model:
   type: "UNet" # or DiT
   params:
-    image_size: *image_size
-    in_channels: 4
+    input_size: 64
+    in_channels: 8
     model_channels: 32
-    out_channels: 1
+    out_channels: 4
     num_res_blocks: 2
     attention_resolutions: [32, 16, 8]
     dropout: 0.0
-    channel_mult: null
+    channel_mult: [1, 2, 3, 4]
     conv_resample: True
     dims: 2
-    y_dim: 192
+    y_dim: null
     context_dim: null
     use_checkpoint: True
     num_heads: 1
@@ -53,27 +56,33 @@ conditioner:
       input_keys: ["img"]
       is_trainable: False
 
-    - type: "ViTExemplarEmbedder"
-      input_keys: ["img", "bboxes"]
-      is_trainable: True
-      params:
-        image_size: *image_size
-        out_channels: 64
-        vit_size: "B"
-        freeze_backbone: False
-        remove_sequence_dim: True
+    # - type: "ViTExemplarEmbedder"
+    #   input_keys: ["img", "bboxes"]
+    #   is_trainable: True
+    #   params:
+    #     input_size: 16
+    #     in_channels: 4
+    #     out_channels: 64
+    #     vit_size: "B"
+    #     freeze_backbone: False
+    #     remove_sequence_dim: True
 
 data:
   dataset:
     name: "FSC147"
     params:
       datadir: ../FSC147_384_V2/
-      targetdir: null
+      targetdir: densitymaps/debugging
       n_exemplars: 3
-      image_size: *image_size
+      image_size: 512
       hflip_p: 0.5
       cj_p: 0.0
       sigma: 0.5
+      center_pad: True
+      bbox_max_size: 50
+      bbox_min_size: 10
+      allow_resize_target: False
+      target_minmax_norm: True
 
   dataloader:
     params:
@@ -81,12 +90,12 @@ data:
       overfit_single_batch: True
 
 train:
-  lr: 1.e-5
-  num_epochs: 10000
+  lr: 1.e-4
+  num_epochs: 10
   grad_clip: -1.0
   use_fp16: False
   ema_rate: 0.9999
-  validation_interval: 200
+  validation_interval: 5
   resume_checkpoint: null
   weight_decay: 0.0
   lr_scheduler: null

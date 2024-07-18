@@ -7,13 +7,13 @@ import sys
 import random
 import os
 
-from itertools import islice
 from torch.optim import AdamW
 
 from . import logger
 from .resample import LossAwareSampler, UniformSampler
 from .plot_utils import draw_bboxes, draw_cls, draw_denoising_process, draw_result
 from .ema import ExponentialMovingAverage
+from .nn import possibly_vae_decode, possibly_vae_encode
 
 
 class TrainLoop:
@@ -25,6 +25,7 @@ class TrainLoop:
 		data,
 		val_data,
 		conditioner,
+		vae,
 		batch_size,
 		lr,
 		log_interval,
@@ -65,6 +66,7 @@ class TrainLoop:
 		self.epoch = 0
 
 		self.conditioner = conditioner
+		self.vae = vae
 		self.opt = self.configure_optimizer()
 		self.scaler = th.cuda.amp.GradScaler(enabled=self.use_fp16)
 		self.sch = self.configure_scheduler(self.opt)
@@ -143,6 +145,7 @@ class TrainLoop:
 		self.opt.zero_grad()
 		batch = torch_to(batch, self.device)
 		cond = torch_to(cond, self.device)
+		batch, cond = self.encode(batch, cond)
 		count = cond.pop("count")
 		t, weights = self.schedule_sampler.sample(batch.shape[0], self.device)
 		with th.autocast(device_type=self.device, dtype=th.float16, enabled=self.use_fp16):
@@ -186,23 +189,36 @@ class TrainLoop:
 			logger.dumpkvs()
 		self.step += 1
 
+	@th.no_grad
 	def validate(self):
 		logger.log("creating samples...")
 		self.model.eval()
 		batch, cond = next(iter(self.val_data))
 		batch = torch_to(batch, self.device)
 		cond = torch_to(cond, self.device)
+		en_batch, en_cond = self.encode(batch.clone(), cond.copy())
 		with th.autocast(device_type=self.device, dtype=th.float16, enabled=self.use_fp16):
 			with self.ema.average_parameters(self.model.parameters()):
 				samples = self.diffusion.p_sample_loop_progressive(
 					self.model,
-					batch.shape,
+					en_batch.shape,
 					model_kwargs=dict(
-						cond=self.conditioner(cond)
-					)
+						cond=self.conditioner(en_cond)
+					),
+					clip_denoised=False,
 				)
-				log_denoising_process(samples, self.diffusion, t_step=125, step=self.step)
+				log_denoising_process(samples, self.diffusion, vae=self.vae, t_step=125, step=self.step)
 				log_batch_with_cond(batch, cond, prefix="val", step=self.step)
+
+
+	@th.no_grad
+	def encode(self, batch, cond, encode_keys=["img"]):
+		batch = possibly_vae_encode(batch, self.vae)
+		for k in encode_keys:
+			if k in cond:
+				cond[k] = possibly_vae_encode(cond[k], self.vae)
+		return batch, cond
+
 
 	def save(self):
 		logger.log(f"saving model...")
@@ -311,16 +327,18 @@ def log_batch_with_cond(batch, cond, prefix="train", step=None):
 		logger.logimg(img, f"{prefix}_cond", step=step)
 
 
-def log_denoising_process(samples, diffusion, t_step=125, step=None):
+def log_denoising_process(samples, diffusion, vae=None, t_step=125, step=None):
 	assert diffusion.num_timesteps % t_step == 0
-	out = []
-	pred_xstart = []
+	outs = []
+	xstarts = []
 	for i, s in enumerate(samples):
 		if i % t_step == 0 or i == diffusion.num_timesteps - 1:
-			out.append(s["sample"])
-			pred_xstart.append(s["pred_xstart"])
-	final = out[-1]
-	imgs = draw_denoising_process(pred_xstart)
+			samp = possibly_vae_decode(s["sample"], vae)
+			pred_xstart = possibly_vae_decode(s["pred_xstart"], vae)
+			outs.append(samp)
+			xstarts.append(pred_xstart)
+	final = outs[-1]
+	imgs = draw_denoising_process(xstarts)
 	logger.logimg(imgs, "pred_xstarts", step=step)
 	logger.logimg(final, "final", step=step)
 	logger.savetensor(final, "final", step)

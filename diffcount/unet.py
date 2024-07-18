@@ -389,7 +389,7 @@ class UNetModel(nn.Module):
 
 	def __init__(
 		self,
-		image_size,
+		# image_size,
 		in_channels,
 		model_channels,
 		out_channels,
@@ -415,7 +415,7 @@ class UNetModel(nn.Module):
 		if num_heads_upsample == -1:
 			num_heads_upsample = num_heads
 
-		self.image_size = image_size
+		# self.image_size = image_size
 		self.in_channels = in_channels
 		self.model_channels = model_channels
 		self.out_channels = out_channels
@@ -520,7 +520,6 @@ class UNetModel(nn.Module):
 				ds *= 2
 				self._feature_size += ch
 
-		count_in_dim = ch
 		self.middle_block = TimestepEmbedSequential(
 			ResBlock(
 				ch,

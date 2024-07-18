@@ -7,7 +7,7 @@ from contextlib import nullcontext
 from functools import partial
 from itertools import chain
 
-from .nn import disabled_train, count_params
+from .nn import disabled_train, count_params, possibly_vae_encode
 
 
 class AbstractEmbModel(nn.Module):
@@ -95,7 +95,8 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 
 	def __init__(
 		self, 
-		image_size,
+		input_size,
+		in_channels,
 		out_channels,
 		vit_size="B",
 		freeze_backbone=True,
@@ -112,7 +113,8 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 			raise ImportError("detectron2 is required for ViTExemplarEmbedder")
 		self._Boxes = Boxes
 
-		self.image_size = image_size
+		self.input_size = input_size
+		self.in_channels = in_channels
 		self.remove_sequence_dim = remove_sequence_dim
 		if vit_size == "B":
 			embed_dim, depth, num_heads, dp = 768, 12, 12, 0.1
@@ -146,7 +148,8 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		
 		self.backbone = SimpleFeaturePyramid(
 			net=ViT(  # Single-scale ViT backbone
-				img_size=image_size,
+				img_size=input_size,
+				in_chans=in_channels,
 				patch_size=16,
 				embed_dim=embed_dim,
 				depth=depth,
@@ -176,7 +179,8 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		self.fc1 = nn.Linear(256 * 7**2, out_channels) # vit_out_channels * roi_output_size^2
 
 		checkpointer = DetectionCheckpointer(self)
-		checkpointer.load(ViTExemplarEmbedder.VITDET_PRETRAINED_MODELS[vit_size])
+		# checkpointer.load(ViTExemplarEmbedder.VITDET_PRETRAINED_MODELS[vit_size])
+		checkpointer.load(self.VITDET_PRETRAINED_MODELS[vit_size])
 
 		if freeze_backbone:
 			self.backbone.train = disabled_train

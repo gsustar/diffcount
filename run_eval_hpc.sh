@@ -12,4 +12,4 @@
 export HF_DATASETS_CACHE=/d/hpc/projects/FRI/DL/gs1121/.cache
 
 srun --kill-on-bad-exit=1 \
-	python eval.py --expdir $1 --checkpoint $2 --batch_size 16 --use_fp16
+	python eval.py --expdir $1 --checkpoint $2 --batch_size 1 --use_fp16

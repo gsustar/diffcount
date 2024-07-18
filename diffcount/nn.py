@@ -153,6 +153,21 @@ def mean_flat(tensor):
 # def layer_normalization(dim):
 # 	return LayerNorm(dim)
 
+@th.no_grad
+def possibly_vae_encode(x, vae=None):
+	if vae is not None:
+		_, ch, _, _ = x.shape
+		if ch == 1:
+			x = x.expand(-1, 3, -1, -1)
+		return vae.encode(x).latent_dist.sample() * vae.config.scaling_factor
+	return x
+
+@th.no_grad
+def possibly_vae_decode(z, vae=None):
+	if vae is not None:
+		return vae.decode(z / vae.config.scaling_factor).sample
+	return z
+
 
 def timestep_embedding(timesteps, dim, max_period=10000):
 	"""
