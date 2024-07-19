@@ -14,14 +14,9 @@ from .dit import DiT_models
 
 
 def assert_config(config):
-	#todo assert sequence dim and conditioning type match
 	for att in ["model", "diffusion", "data", "log"]:
 		assert hasattr(config, att), f"config missing attribute: {att}"
 
-	# todo maybe remove
-	assert not (config.model.params.learn_count and config.diffusion.params.pred_count_from_xstart), (
-		"learn_count and pred_count_from_xstart cannot both be True."
-	)
 	assert config.model.params.learn_sigma == config.diffusion.params.learn_sigma
 	assert not hasattr(config.data.dataset.params, "split")
 
@@ -116,102 +111,6 @@ def create_conditioner(conditioner_config, train=True):
 	return cond.Conditioner(embedders)
 
 
-# def create_model_and_diffusion(
-# 	model_config, 
-# 	diffusion_config
-# ):	
-# 	assert not model_config.params.learn_count and diffusion_config.params.pred_count_from_xstart, (
-# 		"learn_count and pred_count_from_xstart cannot both be True."
-# 	)
-# 	if diffusion_config.type == "Deblur":
-# 		learn_sigma = False
-# 		# assert not hasattr(diffusion_config.params, "learn_sigma"), "learn_sigma is not supported for Deblur diffusion."
-# 		diffusion = create_deblur_diffusion(
-# 			**vars(diffusion_config.params)
-# 		)
-# 	elif diffusion_config.type == "Denoise":
-# 		learn_sigma = diffusion_config.params.learn_sigma
-# 		diffusion = create_denoise_diffusion(
-# 			**vars(diffusion_config.params),
-# 		)
-# 	else:
-# 		raise ValueError(f"Unsupported diffusion type: {diffusion_config.type}")
-
-# 	# if hasattr(model_config.params, "learn_sigma"):
-# 	# 	delattr(model_config.params, "learn_sigma")
-
-# 	if model_config.type == "UNet":
-# 		model = create_unet_model(
-# 			learn_sigma=learn_sigma,
-# 			**vars(model_config.params)
-# 		)
-# 	elif model_config.type == "DiT":
-# 		model = create_dit_model(
-# 			learn_sigma=learn_sigma,
-# 			**vars(model_config.params),
-# 		)
-# 	else:
-# 		raise ValueError(f"Unsupported model type: {model_config.type}")
-	
-# 	return model, diffusion
-
-
-# def create_data_and_conditioner(
-# 	data_config,
-# 	conditioner_config,
-# 	train,
-# ):
-# 	splits = ['train', 'val', None] if train else [None, 'val', 'test']
-# 	if data_config.dataset.name == "FSC147":
-# 		train_dataset, val_dataset, test_dataset = (
-# 			FSC147(
-# 				**vars(data_config.dataset.params),
-# 				split=split
-# 			) if split else None for split in splits
-# 		)
-# 		create_conditioner_fn = create_fsc147_conditioner
-# 	elif data_config.dataset.name == "MNIST":
-# 		train_dataset, val_dataset, test_dataset = (
-# 			MNIST(
-# 				**vars(data_config.dataset.params),
-# 				split=split,
-# 			) if split else None for split in splits
-# 		)
-# 		create_conditioner_fn = create_mnist_conditioner
-# 	else:
-# 		raise ValueError(f"Unknown dataset: {data_config.dataset}")
-	
-# 	if conditioner_config is not None:
-# 		conditioner = create_conditioner_fn(
-# 			**vars(conditioner_config.params)
-# 		)
-# 	else:
-# 		conditioner = create_empty_conditioner()
-
-# 	if train:
-# 		train_data = load_data(
-# 			dataset=train_dataset,
-# 			batch_size=data_config.dataloader.params.batch_size,
-# 			shuffle=True,
-# 			overfit_single_batch=data_config.dataloader.params.overfit_single_batch,
-# 		)
-# 		test_data = None
-# 	else:
-# 		test_data = load_data(
-# 			dataset=test_dataset,
-# 			batch_size=data_config.dataloader.params.batch_size,
-# 			shuffle=False,
-# 		)
-# 		train_data = None
-	
-# 	val_data = load_data(
-# 		dataset=val_dataset,
-# 		batch_size=data_config.dataloader.params.batch_size,
-# 		shuffle=False,
-# 	) if not data_config.dataloader.params.overfit_single_batch else train_data
-
-# 	return train_data, val_data, test_data, conditioner
-
 def create_unet_model(
 	input_size,
 	in_channels,
@@ -276,86 +175,6 @@ def create_unet_model(
 		learn_count=learn_count,
 	)
 
-# def create_unet_model(
-# 	image_size,
-# 	in_channels,
-# 	model_channels,
-# 	out_channels,
-# 	num_res_blocks,
-# 	attention_resolutions,
-# 	dropout,
-# 	channel_mult,
-# 	conv_resample,
-# 	dims,
-# 	num_classes,
-# 	use_checkpoint,
-# 	num_heads,
-# 	num_head_channels,
-# 	num_heads_upsample,
-# 	use_scale_shift_norm,
-# 	resblock_updown,
-# 	transformer_depth,
-# 	context_dim,
-# 	disable_self_attentions,
-# 	num_attention_blocks,
-# 	disable_middle_self_attn,
-# 	disable_middle_transformer,
-# 	use_linear_in_transformer,
-# 	spatial_transformer_attn_type,
-# 	adm_in_channels,
-# 	learn_sigma,
-# ):
-# 	if channel_mult is None:
-# 		if image_size == 512:
-# 			channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
-# 		elif image_size == 256:
-# 			channel_mult = (1, 1, 2, 2, 4, 4)
-# 		elif image_size == 128:
-# 			channel_mult = (1, 1, 2, 3, 4)
-# 		elif image_size == 64:
-# 			channel_mult = (1, 2, 3, 4)
-# 		else:
-# 			raise ValueError(f"unsupported image size: {image_size}")
-
-
-# 	attention_ds = []
-# 	for res in attention_resolutions:
-# 		attention_ds.append(image_size // int(res))
-	
-# 	if context_dim is not None:
-# 		context_dim = int(context_dim)
-
-# 	if adm_in_channels is not None:
-# 		adm_in_channels = int(adm_in_channels)
-
-# 	return UNetModel(
-# 		in_channels=in_channels,
-# 		model_channels=model_channels,
-# 		out_channels=(out_channels if not learn_sigma else 2 * out_channels),
-# 		num_res_blocks=num_res_blocks,
-# 		attention_resolutions=tuple(attention_ds),
-# 		dropout=dropout,
-# 		channel_mult=channel_mult,
-# 		conv_resample=conv_resample,
-# 		dims=dims,
-# 		num_classes=num_classes,
-# 		use_checkpoint=use_checkpoint,
-# 		num_heads=num_heads,
-# 		num_head_channels=num_head_channels,
-# 		num_heads_upsample=num_heads_upsample,
-# 		use_scale_shift_norm=use_scale_shift_norm,
-# 		resblock_updown=resblock_updown,
-# 		transformer_depth=transformer_depth,
-# 		context_dim=context_dim,
-# 		disable_self_attentions=disable_self_attentions,
-# 		num_attention_blocks=num_attention_blocks,
-# 		disable_middle_self_attn=disable_middle_self_attn,
-# 		disable_middle_transformer=disable_middle_transformer,
-# 		use_linear_in_transformer=use_linear_in_transformer,
-# 		spatial_transformer_attn_type=spatial_transformer_attn_type,
-# 		adm_in_channels=adm_in_channels,
-# 	)
-
 
 def create_dit_model(
 	dit_size,
@@ -375,46 +194,6 @@ def create_dit_model(
 		learn_sigma=learn_sigma,
 	)
 	return model
-
-
-# def create_empty_conditioner():
-# 	return Conditioner([])
-
-
-# def create_mnist_conditioner(
-# 	embed_dim,
-# 	is_trainable,
-# 	add_sequence_dim,
-# ):
-# 	return Conditioner([
-# 		ClassEmbedder(
-# 			embed_dim=embed_dim, 
-# 			is_trainable=is_trainable, 
-# 			n_classes=10, 
-# 			add_sequence_dim=add_sequence_dim
-# 		)
-# 	])
-
-
-# def create_fsc147_conditioner(
-# 	image_size,
-# 	out_channels,
-# 	vit_size,
-# 	freeze_backbone,
-# 	remove_sequence_dim,
-# 	is_trainable,
-# ):
-# 	return Conditioner([
-# 		ImageConcatEmbedder(),
-# 		ViTExemplarEmbedder(
-# 			image_size=image_size,
-# 			out_channels=out_channels,
-# 			vit_size=vit_size,
-# 			is_trainable=is_trainable,
-# 			remove_sequence_dim=remove_sequence_dim,
-# 			freeze_backbone=freeze_backbone,
-# 		)
-# 	])
 
 
 def create_deblur_diffusion(
@@ -448,10 +227,11 @@ def create_denoise_diffusion(
 	rescale_learned_sigmas,
 	timestep_respacing,
 	lmbd_vlb,
-	lmbd_count,
-	t_count_weighting_scheme,
-	pred_count_from_xstart,
-	**wscheme_kwargs
+	lmbd_xs_count,
+	lmbd_cb_count,
+	t_mse_weighting_scheme,
+	t_xs_count_weighting_scheme,
+	t_cb_count_weighting_scheme,
 ):
 	betas = dd.get_named_beta_schedule(noise_schedule, diffusion_steps)
 	if use_kl:
@@ -480,10 +260,11 @@ def create_denoise_diffusion(
 		loss_type=loss_type,
 		rescale_timesteps=rescale_timesteps,
 		lmbd_vlb=lmbd_vlb,
-		lmbd_count=lmbd_count,
-		t_count_weighting_scheme=t_count_weighting_scheme,
-		pred_count_from_xstart=pred_count_from_xstart,
-		**wscheme_kwargs
+		lmbd_xs_count=lmbd_xs_count,
+		lmbd_cb_count=lmbd_cb_count,
+		t_mse_weighting_scheme=t_mse_weighting_scheme,
+		t_xs_count_weighting_scheme=t_xs_count_weighting_scheme,
+		t_cb_count_weighting_scheme=t_cb_count_weighting_scheme,
 	)
 
 

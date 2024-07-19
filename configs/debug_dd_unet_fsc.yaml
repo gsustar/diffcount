@@ -1,10 +1,13 @@
 ###################################################   Variables   ##################################################
-define: &image_size 256
 define: &learn_sigma True
 
 ###################################################    Config     ##################################################
 name: debug_dd_unet_fsc
 vae: "stabilityai/sdxl-vae"
+# vae:
+#   enabled: True
+#   checkpoint: "stabilityai/sdxl-vae"
+#   cache_latents: True
 # vae: null
 diffusion:
   schedule_sampler: "uniform"
@@ -20,10 +23,11 @@ diffusion:
     rescale_learned_sigmas: False
     timestep_respacing: ""
     lmbd_vlb: 0.001
-    lmbd_count: 0.005
-    pred_count_from_xstart: False
-    t_count_weighting_scheme: "exp"
-    k: 25.0
+    lmbd_xs_count: 0.005
+    lmbd_cb_count: 0.0
+    t_mse_weighting_scheme: "uniform"
+    t_xs_count_weighting_scheme: "exp"
+    t_cb_count_weighting_scheme: "exp"
 
 model:
   type: "UNet" # or DiT
@@ -91,11 +95,11 @@ data:
 
 train:
   lr: 1.e-4
-  num_epochs: 10
+  num_epochs: 10000
   grad_clip: -1.0
   use_fp16: False
   ema_rate: 0.9999
-  validation_interval: 5
+  validation_interval: 1000
   resume_checkpoint: null
   weight_decay: 0.0
   lr_scheduler: null

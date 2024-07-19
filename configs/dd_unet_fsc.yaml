@@ -1,9 +1,9 @@
 ###################################################   Variables   ##################################################
-define: &image_size 256
 define: &learn_sigma True
 
 ###################################################    Config     ##################################################
 name: dd_unet_fsc
+vae: "stabilityai/sdxl-vae"
 diffusion:
   schedule_sampler: "uniform"
   type: "Denoise"
@@ -18,17 +18,19 @@ diffusion:
     rescale_learned_sigmas: False
     timestep_respacing: ""
     lmbd_vlb: 0.001
-    lmbd_count: 0.005
-    t_count_weighting_scheme: "exp"
-    pred_count_from_xstart: True
+    lmbd_xs_count: 0.005
+    lmbd_cb_count: 0.0
+    t_mse_weighting_scheme: "uniform"
+    t_xs_count_weighting_scheme: "exp"
+    t_cb_count_weighting_scheme: "exp"
 
 model:
   type: "UNet"
   params:
-    image_size: *image_size
-    in_channels: 4
+    input_size: 64
+    in_channels: 8
     model_channels: 192
-    out_channels: 1
+    out_channels: 4
     num_res_blocks: 2
     attention_resolutions: [32, 16, 8]
     dropout: 0.0
@@ -36,7 +38,7 @@ model:
     conv_resample: True
     dims: 2
     y_dim: null
-    context_dim: 256
+    context_dim: null
     use_checkpoint: True
     num_heads: -1
     num_head_channels: 64
@@ -53,15 +55,16 @@ conditioner:
       input_keys: ["img"]
       is_trainable: False
 
-    - type: "ViTExemplarEmbedder"
-      input_keys: ["img", "bboxes"]
-      is_trainable: True
-      params:
-        image_size: *image_size
-        out_channels: 256
-        vit_size: "B"
-        freeze_backbone: False
-        remove_sequence_dim: False
+    # - type: "ViTExemplarEmbedder"
+    #   input_keys: ["img", "bboxes"]
+    #   is_trainable: True
+    #   params:
+    #     input_size: 64
+    #     in_channels: 4
+    #     out_channels: 64
+    #     vit_size: "B"
+    #     freeze_backbone: False
+    #     remove_sequence_dim: True
 
 data:
   dataset:
@@ -70,7 +73,7 @@ data:
       datadir: /d/hpc/projects/FRI/DL/gs1121/FSC147_384_V2/
       targetdir: null
       n_exemplars: 3
-      image_size: *image_size
+      image_size: 512
       hflip_p: 0.5
       cj_p: 0.0
       sigma: 0.5
@@ -81,7 +84,7 @@ data:
       overfit_single_batch: False
 
 train:
-  lr: 1.5e-5
+  lr: 1.0e-5
   num_epochs: 0
   grad_clip: -1.0
   use_fp16: False

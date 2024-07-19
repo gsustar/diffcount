@@ -14,12 +14,14 @@ from .resample import LossAwareSampler, UniformSampler
 from .plot_utils import draw_bboxes, draw_cls, draw_denoising_process, draw_result
 from .ema import ExponentialMovingAverage
 from .nn import possibly_vae_decode, possibly_vae_encode
+from .count_utils import XSCountPredictor
 
 
 class TrainLoop:
 	def __init__(
 		self,
 		*,
+		image_size,
 		model,
 		diffusion,
 		data,
@@ -74,6 +76,15 @@ class TrainLoop:
 			self.model.parameters(),
 			decay=ema_rate,
 		)
+		if self.vae is None:
+			self.xs_count_predictor = lambda x: th.sum((x + 1) / 2, dim=(1, 2, 3), keepdim=True)
+		else:
+			input_size = image_size // 8
+			self.xs_count_predictor = XSCountPredictor(
+				input_dim=input_size * input_size * 4,
+				hidden_dim=128
+			).to(self.device)
+
 		if self.resume_checkpoint:
 			self.load()
 		
@@ -157,6 +168,7 @@ class TrainLoop:
 					cond=self.conditioner(cond),
 					count=count,
 				),
+				xs_count_predictor=self.xs_count_predictor
 			)
 		if isinstance(self.schedule_sampler, LossAwareSampler):
 			self.schedule_sampler.update_with_all_losses(
@@ -334,7 +346,7 @@ def log_denoising_process(samples, diffusion, vae=None, t_step=125, step=None):
 	for i, s in enumerate(samples):
 		if i % t_step == 0 or i == diffusion.num_timesteps - 1:
 			samp = possibly_vae_decode(s["sample"], vae)
-			pred_xstart = possibly_vae_decode(s["pred_xstart"], vae)
+			pred_xstart = possibly_vae_decode(s["pred_xstart"], vae, clip_decoded=True)
 			outs.append(samp)
 			xstarts.append(pred_xstart)
 	final = outs[-1]

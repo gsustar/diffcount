@@ -12,6 +12,7 @@ from einops import rearrange
 
 from .attention import BasicTransformerBlock
 from .dit import DiTBlock
+from .count_utils import CountingBranch
 from .nn import (
 	conv_nd,
 	linear,
@@ -322,40 +323,6 @@ class SpatialTransformer(nn.Module):
 		return x + x_in
 
 
-class CountingBranch(nn.Module):
-	
-	def __init__(self, feat_dims, hidden_dim=64, use_conv=False):
-		super().__init__()
-
-		self.use_conv = use_conv
-		self.num_feats = len(feat_dims)
-		self.input_dim = self.num_feats * hidden_dim if use_conv else int(sum(feat_dims.values()))
-
-		if use_conv:
-			self.conv1s = nn.ModuleDict(
-				{key: nn.Conv2d(in_dim, hidden_dim, 1) for key, in_dim in feat_dims.items()}
-			)
-		self.avgpool = nn.AdaptiveAvgPool2d(1)
-		self.norm = nn.LayerNorm(self.input_dim)
-		self.mlp = nn.Sequential(
-			nn.Linear(self.input_dim, hidden_dim),
-			nn.SiLU(),
-			# nn.ReLU(),
-			nn.Linear(hidden_dim, 1)
-		)
-
-	def forward(self, feats):
-		if self.use_conv:
-			x = [self.conv1s[key](feats[key]) for key in feats]
-		else:
-			x = [feats[key] for key in feats]
-		x = th.cat([self.avgpool(feats[key]) for key in feats], dim=1)
-		x = rearrange(x, 'b c h w-> b (c h w)')
-		x = self.norm(x)
-		x = self.mlp(x)
-		return x
-
-
 class UNetModel(nn.Module):
 	"""
 	The full UNet model with attention and timestep embedding.
@@ -610,8 +577,8 @@ class UNetModel(nn.Module):
 				self._feature_size += ch
 
 
-		self.feat_extract_list = [2, 5, 8, 11, 14, 17, 20][:len(channel_mult)]
 		if learn_count:
+			self.feat_extract_list = [2, 5, 8, 11, 14, 17, 20][:len(channel_mult)]
 			# layer_list = [1, 4, 7, 10, 13, 17]
 			feat_dims = {
 				f"p{layer}": model_channels * mult for layer, mult in zip(self.feat_extract_list, channel_mult)
@@ -677,15 +644,16 @@ class UNetModel(nn.Module):
 			x = th.cat([x, e], dim=1)
 			x = module(x, emb, context=context)
 
-			if layer in self.feat_extract_list:
+			if self.learn_count and layer in self.feat_extract_list:
 				en_feats[f"p{layer}"] = e.clone()
 				de_feats[f"p{layer}"] = x.clone()
 
 		count = None
 		if self.learn_count:
 			count = self.counting_branch(de_feats)
+			
 		out = self.out(x)
-		return dict(out=out, count=count, en_feats=en_feats, de_feats=de_feats)
+		return dict(out=out, count=count)
 
 
 	def forward(self, x, t, cond, **kwargs):

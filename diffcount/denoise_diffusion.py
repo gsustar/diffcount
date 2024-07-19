@@ -12,7 +12,7 @@ import numpy as np
 import torch as th
 
 from .nn import mean_flat
-from .count import pmax_threshold_count
+from .count_utils import XSCountPredictor
 from .losses import normal_kl, discretized_gaussian_log_likelihood
 from .base_diffusion import BaseDiffusion
 
@@ -62,6 +62,23 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 		t2 = (i + 1) / num_diffusion_timesteps
 		betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
 	return np.array(betas)
+
+
+def get_t_weighting_scheme(name, num_difusion_timesteps, lmbd_t, snr):
+	if name == "p2":
+		k, gamma = 1.0, 0.5
+		p2 = lmbd_t / (k + snr) ** gamma
+		t_weights = (p2 - p2.min()) / (p2.max() - p2.min())
+	elif name == "exp":
+		k = 25.0
+		t_weights = (
+			1 - (np.exp(-k * (np.arange(num_difusion_timesteps) / num_difusion_timesteps)) - 1) / (np.exp(-k) - 1)
+		)
+	elif name == "uniform":
+		t_weights = np.ones(num_difusion_timesteps)
+	else:
+		raise ValueError(f"Unknown t_count_weighting_scheme: {name}")
+	return t_weights
 
 
 class ModelMeanType(enum.Enum):
@@ -124,10 +141,11 @@ class DenoiseDiffusion(BaseDiffusion):
 		loss_type,
 		rescale_timesteps=False,
 		lmbd_vlb=0.001,
-		lmbd_count=0.0,
-		pred_count_from_xstart=False,
-		t_count_weighting_scheme="uniform",
-		**wscheme_kwargs
+		lmbd_xs_count=0.0,
+		lmbd_cb_count=0.0,
+		t_mse_weighting_scheme="uniform",
+		t_xs_count_weighting_scheme="uniform",
+		t_cb_count_weighting_scheme="uniform",
 	):
 		self.model_mean_type = model_mean_type
 		self.model_var_type = model_var_type
@@ -135,9 +153,11 @@ class DenoiseDiffusion(BaseDiffusion):
 		self.rescale_timesteps = rescale_timesteps
 
 		self.lmbd_vb = lmbd_vlb
-		self.lmbd_count = lmbd_count
-		self.t_count_weighting_scheme = t_count_weighting_scheme
-		self.pred_count_from_xstart = pred_count_from_xstart
+		self.lmbd_xs_count = lmbd_xs_count
+		self.lmbd_cb_count = lmbd_cb_count
+		self.t_mse_weighting_scheme = t_mse_weighting_scheme
+		self.t_xs_count_weighting_scheme = t_xs_count_weighting_scheme
+		self.t_cb_count_weighting_scheme = t_cb_count_weighting_scheme
 
 		# Use float64 for accuracy.
 		betas = np.array(betas, dtype=np.float64)
@@ -179,23 +199,34 @@ class DenoiseDiffusion(BaseDiffusion):
 		)
 
 		self.snr = 1.0 / (1 - self.alphas_cumprod) - 1
-		self.lmbd_t = (1.0 - betas) * (1.0 - self.alphas_cumprod) / betas
+		self.lmbd_t = (
+			(1.0 - betas) 
+			* (1.0 - self.alphas_cumprod) 
+			/ betas
+		)
 
-		if self.t_count_weighting_scheme == "p2":
-			k = wscheme_kwargs.get("k", 1.0)
-			gamma = wscheme_kwargs.get("gamma", 0.5)
-			p2 = self.lmbd_t / (k + self.snr) ** gamma
-			self.t_count_weights = (p2 - p2.min()) / (p2.max() - p2.min())
-
-		elif self.t_count_weighting_scheme == "exp":
-			k = wscheme_kwargs.get("k", 25.0)
-			self.t_count_weights = 1 - (np.exp(-k * (np.arange(self.num_timesteps) / self.num_timesteps)) - 1) / (np.exp(-k) - 1)
-
-		elif self.t_count_weighting_scheme == "uniform":
-			self.t_count_weights = np.ones(self.num_timesteps)
-
-		else:
-			raise ValueError(f"Unknown t_count_weighting_scheme: {self.t_count_weighting_scheme}")
+		self.t_mse_weights = get_t_weighting_scheme(
+			self.t_mse_weighting_scheme, 
+			self.num_timesteps, 
+			self.lmbd_t, 
+			self.snr
+		)
+		self.t_xs_count_weights = get_t_weighting_scheme(
+			self.t_xs_count_weighting_scheme, 
+			self.num_timesteps, 
+			self.lmbd_t, 
+			self.snr
+		)
+		self.t_cb_count_weights = get_t_weighting_scheme(
+			self.t_cb_count_weighting_scheme,
+			self.num_timesteps,
+			self.lmbd_t,
+			self.snr
+		)
+		# self.xs_count_predictor = XSCountPredictor(
+		# 	input_dim=input_size*input_size*out_channels, 
+		# 	hidden_dim=128
+		# )
 
 
 	def q_mean_variance(self, x_start, t):
@@ -540,7 +571,7 @@ class DenoiseDiffusion(BaseDiffusion):
 		output = th.where((t == 0), decoder_nll, kl)
 		return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-	def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
+	def training_losses(self, model, x_start, t, model_kwargs=None, noise=None, xs_count_predictor=None):
 		"""
 		Compute training losses for a single timestep.
 
@@ -581,7 +612,7 @@ class DenoiseDiffusion(BaseDiffusion):
 			
 			model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
-			model_count = model_output["count"]
+			model_cb_count = model_output["count"]
 			model_output = model_output["out"]
 
 			if self.model_var_type in [
@@ -619,7 +650,8 @@ class DenoiseDiffusion(BaseDiffusion):
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
 
-			if self.pred_count_from_xstart:
+			model_xs_count = None
+			if self.lmbd_xs_count > 0.0:
 				if pred_xstart is None:
 					if self.model_mean_type == ModelMeanType.START_X:
 						pred_xstart = model_output
@@ -629,18 +661,25 @@ class DenoiseDiffusion(BaseDiffusion):
 						pred_xstart = self._predict_xstart_from_xprev(x_t, t, model_output)
 					else:
 						raise NotImplementedError(self.model_mean_type)
-				# model_count = pmax_threshold_count(pred_xstart)
-				model_count = th.sum((pred_xstart + 1) / 2, dim=(1, 2, 3), keepdim=True)
+				model_xs_count = xs_count_predictor(pred_xstart)
 
-			terms["mse"] = mean_flat((target - model_output) ** 2)
+			lmbd_t_mse = _extract_into_tensor(self.t_mse_weights, t, target.shape)
+			terms["mse"] = mean_flat(lmbd_t_mse * (target - model_output) ** 2)
 
-			lmbd_t_count = _extract_into_tensor(self.t_count_weights, t, target_count.shape)
-			if model_count is not None:
-				terms["count"] = self.lmbd_count * mean_flat(lmbd_t_count * abs(target_count - model_count))
+			if model_xs_count is not None and self.lmbd_xs_count > 0.0:
+				lmbd_t_xs_count = _extract_into_tensor(self.t_xs_count_weights, t, target_count.shape)
+				terms["xs_count"] = self.lmbd_xs_count * mean_flat(lmbd_t_xs_count * abs(target_count - model_xs_count))
+
+			if model_cb_count is not None and self.lmbd_cb_count > 0.0:
+				lmbd_t_cb_count = _extract_into_tensor(self.t_cb_count_weights, t, target_count.shape)
+				terms["cb_count"] = self.lmbd_cb_count * mean_flat(lmbd_t_cb_count * abs(target_count - model_cb_count))
 
 			terms["loss"] = terms["mse"]
-			if "count" in terms:
-				terms["loss"] = terms["loss"] + terms["count"]
+			if "xs_count" in terms:
+				terms["loss"] = terms["loss"] + terms["xs_count"]
+
+			if "cb_count" in terms:
+				terms["loss"] = terms["loss"] + terms["cb_count"]
 
 			if "vb" in terms:
 				terms["loss"] = terms["loss"] + terms["vb"]

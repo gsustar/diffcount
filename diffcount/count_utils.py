@@ -1,7 +1,11 @@
 import torch as th
+import torch.nn as nn
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+
+from einops import rearrange
+
 
 def remove_background(density, eps=0.1):
 	avg = density.mean(dim=(1,2,3), keepdim=True)
@@ -39,6 +43,53 @@ def contour_count(density, threshold=0.0):
 		conts.append(len(cont))
 	return th.tensor(conts)
 
+
+
+class XSCountPredictor(nn.Module):
+
+	def __init__(self, input_dim, hidden_dim=64):
+		super().__init__()
+
+		self.input_dim = input_dim
+		self.hidden_dim = hidden_dim
+
+		self.norm = nn.LayerNorm(self.input_dim)
+		self.mlp = nn.Sequential(
+			nn.Linear(self.input_dim, self.hidden_dim),
+			nn.ReLU(),
+			nn.Linear(self.hidden_dim, 1)
+		)
+
+	def forward(self, x):
+		x = rearrange(x, 'b c h w-> b (c h w)')
+		x = self.norm(x)
+		x = self.mlp(x)
+		return x
+
+
+
+class CountingBranch(nn.Module):
+	
+	def __init__(self, feat_dims, hidden_dim=64):
+		super().__init__()
+		self.num_feats = len(feat_dims)
+		self.input_dim = int(sum(feat_dims.values()))
+
+		self.avgpool = nn.AdaptiveAvgPool2d(1)
+		self.norm = nn.LayerNorm(self.input_dim)
+		self.mlp = nn.Sequential(
+			nn.Linear(self.input_dim, hidden_dim),
+			nn.ReLU(),
+			nn.Linear(hidden_dim, 1)
+		)
+
+	def forward(self, feats):
+		x = [feats[key] for key in feats]
+		x = th.cat([self.avgpool(feats[key]) for key in feats], dim=1)
+		x = rearrange(x, 'b c h w-> b (c h w)')
+		x = self.norm(x)
+		x = self.mlp(x)
+		return x
 
 
 if __name__ == "__main__":

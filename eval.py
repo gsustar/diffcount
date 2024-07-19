@@ -5,7 +5,7 @@ import os.path as osp
 from diffcount import logger
 from diffcount.ema import ExponentialMovingAverage
 from diffcount.plot_utils import draw_result
-from diffcount.count import pmax_threshold_count
+from diffcount.count_utils import pmax_threshold_count
 from diffcount.train_util import torch_to
 from diffcount.script_util import (
 	create_model,

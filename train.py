@@ -83,6 +83,7 @@ def main():
 
 	logger.log("training...")
 	TrainLoop(
+		image_size=config.data.dataset.params.image_size,
 		model=model,
 		diffusion=diffusion,
 		data=train_data,
@@ -103,7 +104,7 @@ def main():
 		device=dev,
 		grad_clip=config.train.grad_clip,
 		lr_scheduler=config.train.lr_scheduler,
-		seed=config.train.seed
+		seed=config.train.seed,
 	).run_loop()
 
 
