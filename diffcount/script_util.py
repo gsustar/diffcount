@@ -1,4 +1,8 @@
+import os
 import yaml
+import random
+import numpy as np
+import torch as th
 import os.path as osp
 
 from types import SimpleNamespace
@@ -266,6 +270,16 @@ def create_denoise_diffusion(
 		t_xs_count_weighting_scheme=t_xs_count_weighting_scheme,
 		t_cb_count_weighting_scheme=t_cb_count_weighting_scheme,
 	)
+
+
+def seed_everything(seed):
+	random.seed(seed)
+	os.environ['PYTHONHASHSEED'] = str(seed)
+	np.random.seed(seed)
+	th.manual_seed(seed)
+	th.cuda.manual_seed(seed)
+	th.backends.cudnn.deterministic = True
+	th.backends.cudnn.benchmark = True
 
 
 def dict_to_namespace(d):

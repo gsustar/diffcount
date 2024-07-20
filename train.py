@@ -18,6 +18,7 @@ from diffcount.script_util import (
 	namespace_to_dict,
 	parse_config,
 	assert_config,
+	seed_everything,
 )
 from diffcount.train_util import TrainLoop
 from diffcount.deblur_diffusion import DeblurDiffusion
@@ -28,6 +29,9 @@ def main():
 	config = parse_config(args.config)
 	assert_config(config)
 	now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+
+	if config.train.seed is not None:
+		seed_everything(config.train.seed)
 
 	config.log.logdir = osp.join(
 		config.log.logdir,
@@ -104,7 +108,6 @@ def main():
 		device=dev,
 		grad_clip=config.train.grad_clip,
 		lr_scheduler=config.train.lr_scheduler,
-		seed=config.train.seed,
 	).run_loop()
 
 

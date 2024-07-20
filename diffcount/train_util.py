@@ -4,8 +4,6 @@ import numpy as np
 import pprint
 import signal
 import sys
-import random
-import os
 
 from torch.optim import AdamW
 
@@ -42,7 +40,6 @@ class TrainLoop:
 		num_epochs=0,
 		grad_clip=0.0,
 		lr_scheduler=None,
-		seed=None
 	):
 		self.model = model
 		self.diffusion = diffusion
@@ -62,7 +59,6 @@ class TrainLoop:
 		self.num_epochs = num_epochs
 		self.grad_clip = grad_clip
 		self.lr_scheduler = lr_scheduler
-		self.seed = seed
 
 		self.step = 0
 		self.epoch = 0
@@ -87,9 +83,7 @@ class TrainLoop:
 
 		if self.resume_checkpoint:
 			self.load()
-		
-		if self.seed is not None:
-			seed_everything(self.seed)
+
 
 		signal.signal(signal.SIGTERM, self.cleanup)
 		signal.signal(signal.SIGINT, self.cleanup)
@@ -289,16 +283,6 @@ class TrainLoop:
 		logger.log("closing...")
 		logger.close()
 		sys.exit(0)
-
-
-def seed_everything(seed):
-	random.seed(seed)
-	os.environ['PYTHONHASHSEED'] = str(seed)
-	np.random.seed(seed)
-	th.manual_seed(seed)
-	th.cuda.manual_seed(seed)
-	th.backends.cudnn.deterministic = True
-	th.backends.cudnn.benchmark = True
 
 
 def torch_to(x, *args, **kwargs):
