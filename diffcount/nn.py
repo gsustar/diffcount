@@ -165,9 +165,9 @@ def possibly_vae_encode(x, vae=None):
 @th.no_grad
 def possibly_vae_decode(z, vae=None, clip_decoded=False):
 	if vae is not None:
-		x = vae.decode(z / vae.config.scaling_factor).sample
+		z = vae.decode(z / vae.config.scaling_factor).sample
 	if clip_decoded:
-		x = x.clamp(-1, 1)
+		z = z.clamp(-1, 1)
 	return z
 
 
