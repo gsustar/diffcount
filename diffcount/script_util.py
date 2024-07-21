@@ -3,9 +3,11 @@ import yaml
 import random
 import numpy as np
 import torch as th
+import torch.nn as nn
 import os.path as osp
 
 from types import SimpleNamespace
+from diffusers import AutoencoderKL
 
 from . import denoise_diffusion as dd
 from . import deblur_diffusion as bd
@@ -15,6 +17,7 @@ from .datasets import FSC147, MNIST, load_data
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
 from .dit import DiT_models
+from .nn import disabled_train
 
 
 def assert_config(config):
@@ -115,6 +118,16 @@ def create_conditioner(conditioner_config, train=True):
 	return cond.Conditioner(embedders)
 
 
+def create_vae(vae_config, device):
+	vae = None
+	if vae_config is not None and vae_config.enabled:
+		vae = AutoencoderKL.from_pretrained(vae_config.path)
+		vae.train = disabled_train
+		vae.eval()
+		vae.to(device)
+	return vae
+
+
 def create_unet_model(
 	input_size,
 	in_channels,
@@ -137,6 +150,7 @@ def create_unet_model(
 	learn_sigma,
 	learn_count,
 	adalnzero,
+	transformer_depth,
 ):
 	if channel_mult is None:
 		if input_size == 512:
@@ -177,6 +191,7 @@ def create_unet_model(
 		resblock_updown=resblock_updown,
 		adalnzero=adalnzero,
 		learn_count=learn_count,
+		transformer_depth=transformer_depth,
 	)
 
 

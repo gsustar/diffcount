@@ -376,6 +376,7 @@ class UNetModel(nn.Module):
 		resblock_updown=False,
 		adalnzero=False,
 		learn_count=False,
+		transformer_depth=1,
 	):
 		super().__init__()
 
@@ -399,6 +400,10 @@ class UNetModel(nn.Module):
 		self.num_heads_upsample = num_heads_upsample
 		self.adalnzero = adalnzero
 		self.learn_count = learn_count
+
+		if isinstance(transformer_depth, int):
+			transformer_depth = len(channel_mult) * [transformer_depth]
+		transformer_depth_middle = transformer_depth[-1]
 
 		time_embed_dim = model_channels * 4
 		self.time_embed = nn.Sequential(
@@ -453,6 +458,7 @@ class UNetModel(nn.Module):
 							ch, 
 							n_heads=num_heads, 
 							d_head=num_head_channels,
+							depth=transformer_depth[level],
 							y_dim=time_embed_dim,
 							context_dim=context_dim,
 							adalnzero=adalnzero,
@@ -507,6 +513,7 @@ class UNetModel(nn.Module):
 				ch, 
 				n_heads=num_heads, 
 				d_head=num_head_channels,
+				depth=transformer_depth_middle,
 				y_dim=time_embed_dim,
 				context_dim=context_dim,
 				adalnzero=adalnzero,
@@ -551,6 +558,7 @@ class UNetModel(nn.Module):
 							ch, 
 							n_heads=num_heads, 
 							d_head=num_head_channels,
+							depth=transformer_depth[level],
 							y_dim=time_embed_dim,
 							context_dim=context_dim,
 							adalnzero=adalnzero,

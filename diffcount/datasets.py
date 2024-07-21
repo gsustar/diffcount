@@ -246,10 +246,11 @@ class FSC147(Dataset):
 
 		img, bboxes, hflip, new_size = self.transform(img, bboxes, split=self.split)
 
+		img_id = os.path.splitext(self.img_names[index])[0]
 		npypath = os.path.join(
 			self.datadir,
 			self.targetdir, 
-			os.path.splitext(self.img_names[index])[0] + '.npy'
+			img_id + '.npy'
 		)
 		if os.path.exists(npypath):
 			target = np.load(npypath)
@@ -267,7 +268,7 @@ class FSC147(Dataset):
 			target_size=new_size if self.allow_resize_target else None
 		)
 		assert target.shape[-2:] == img.shape[-2:], "target shape does not match image shape."
-		return target, dict(bboxes=bboxes, img=img, count=target_count)
+		return target, dict(bboxes=bboxes, img=img, count=target_count, id=img_id)
 
 
 def load_data(

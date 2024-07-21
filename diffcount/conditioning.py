@@ -6,8 +6,9 @@ import torch.nn as nn
 from contextlib import nullcontext
 from functools import partial
 from itertools import chain
+from torchvision.ops import roi_align
 
-from .nn import disabled_train, count_params, possibly_vae_encode
+from .nn import disabled_train, count_params
 
 
 class AbstractEmbModel(nn.Module):
@@ -206,12 +207,46 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		return x
 
 
-class VAEExemplarEmbedder(AbstractEmbModel):
-	def __init__(self):
-		pass
+class RoIAlignExemplarEmbedder(AbstractEmbModel):
 
-	def forward(self, img, bboxes):
-		pass
+	def __init__(self, 
+			input_channels, 
+			roi_output_size, 
+			out_channels, 
+			hidden_channels=1024, 
+			spatial_scale=0.125,
+			remove_sequence_dim=False,
+		):
+		super().__init__()
+
+		self.roi_output_size = roi_output_size
+		self.spatial_scale = spatial_scale
+		self.remove_sequence_dim = remove_sequence_dim
+		self.mlp = nn.Sequential(
+			nn.Linear(input_channels * roi_output_size**2, hidden_channels),
+			nn.LayerNorm(hidden_channels),
+			nn.ReLU(),
+			nn.Linear(hidden_channels, out_channels)
+		)
+
+	def forward(self, z, bboxes):
+		bs, ch, _, _ = z.shape
+		assert ch > 3, "z must be a feature map not an image"
+		x = roi_align(
+			z, 
+			boxes=list(bboxes), 
+			output_size=self.roi_output_size, 
+			spatial_scale=self.spatial_scale,
+			aligned=True
+		)
+		x = x.flatten(start_dim=1)
+		x = x.reshape(bs, -1, x.shape[1])
+		x = self.mlp(x)
+
+		if self.remove_sequence_dim:
+			x = x.reshape(bs, -1)
+		return x
+
 
 
 class YOLOExemplarEmbedder(AbstractEmbModel):

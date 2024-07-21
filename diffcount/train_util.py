@@ -11,7 +11,7 @@ from . import logger
 from .resample import LossAwareSampler, UniformSampler
 from .plot_utils import draw_bboxes, draw_cls, draw_denoising_process, draw_result
 from .ema import ExponentialMovingAverage
-from .nn import possibly_vae_decode, possibly_vae_encode
+from .nn import possibly_vae_decode, possibly_vae_encode, torch_to
 from .count_utils import XSCountPredictor
 
 
@@ -137,6 +137,7 @@ class TrainLoop:
 
 	def run_epoch(self):
 		self.model.train()
+		self.conditioner.train()
 		for batch, cond in self.data:
 			self.run_step(batch, cond)
 		if self.epoch % self.save_interval == 0 and self.epoch != 0:
@@ -199,6 +200,7 @@ class TrainLoop:
 	def validate(self):
 		logger.log("creating samples...")
 		self.model.eval()
+		self.conditioner.eval()
 		batch, cond = next(iter(self.val_data))
 		batch = torch_to(batch, self.device)
 		cond = torch_to(cond, self.device)
@@ -285,17 +287,6 @@ class TrainLoop:
 		sys.exit(0)
 
 
-def torch_to(x, *args, **kwargs):
-	if isinstance(x, th.Tensor):
-		return x.to(*args, **kwargs)
-	elif isinstance(x, dict):
-		return {k: torch_to(v, *args, **kwargs) for k, v in x.items()}
-	elif isinstance(x, (list, tuple)):
-		return [torch_to(v, *args, **kwargs) for v in x]
-	else:
-		raise ValueError(f"unsupported type: {type(x)}")
-
-
 def get_blob_logdir():
 	# You can change this to be a separate path to save checkpoints to
 	# a blobstore or some external drive.
@@ -323,7 +314,7 @@ def log_batch_with_cond(batch, cond, prefix="train", step=None):
 		logger.logimg(img, f"{prefix}_cond", step=step)
 
 
-def log_denoising_process(samples, diffusion, vae=None, t_step=125, step=None):
+def log_denoising_process(samples, diffusion, vae, t_step=125, step=None):
 	assert diffusion.num_timesteps % t_step == 0
 	outs = []
 	xstarts = []

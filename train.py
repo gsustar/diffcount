@@ -6,8 +6,6 @@ import shutil
 import os.path as osp
 import torch as th
 
-from diffusers import AutoencoderKL
-
 from diffcount import logger
 from diffcount.resample import create_named_schedule_sampler
 from diffcount.script_util import (
@@ -15,6 +13,7 @@ from diffcount.script_util import (
 	create_diffusion,
 	create_data,
 	create_conditioner,
+	create_vae,
 	namespace_to_dict,
 	parse_config,
 	assert_config,
@@ -66,11 +65,10 @@ def main():
 	diffusion = create_diffusion(config.diffusion)
 	schedule_sampler = create_named_schedule_sampler(config.diffusion.schedule_sampler, diffusion)
 
-	vae = getattr(config, "vae", None)
-	if vae is not None:
-		logger.log("creating VAE...")
-		vae = AutoencoderKL.from_pretrained(vae)
-		vae.to(dev)
+	logger.log("creating VAE...")
+	vae = create_vae(
+		getattr(config, "vae", None), device=dev
+	)
 
 	logger.log("creating data...")
 	train_data, val_data, _ = create_data(config.data, train=True)

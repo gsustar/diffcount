@@ -165,10 +165,20 @@ def possibly_vae_encode(x, vae=None):
 @th.no_grad
 def possibly_vae_decode(z, vae=None, clip_decoded=False):
 	if vae is not None:
-		z = vae.decode(z / vae.config.scaling_factor).sample
+		x = vae.decode(z / vae.config.scaling_factor).sample
 	if clip_decoded:
-		z = z.clamp(-1, 1)
+		x = x.clamp(-1, 1)
 	return z
+
+
+def torch_to(x, *args, **kwargs):
+	if isinstance(x, th.Tensor):
+		return x.to(*args, **kwargs)
+	if isinstance(x, dict):
+		return {k: torch_to(v, *args, **kwargs) for k, v in x.items()}
+	if isinstance(x, (list, tuple)):
+		return [torch_to(v, *args, **kwargs) for v in x]
+	return x
 
 
 def timestep_embedding(timesteps, dim, max_period=10000):

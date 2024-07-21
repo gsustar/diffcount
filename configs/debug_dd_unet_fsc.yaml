@@ -3,12 +3,12 @@ define: &learn_sigma True
 
 ###################################################    Config     ##################################################
 name: debug_dd_unet_fsc
-vae: "stabilityai/sdxl-vae"
-# vae:
-#   enabled: True
-#   checkpoint: "stabilityai/sdxl-vae"
-#   cache_latents: True
-# vae: null
+
+vae:
+  enabled: True
+  path: "stabilityai/sdxl-vae"
+  cache: "../FSC147_384_V2/latents/debugging" # todo
+
 diffusion:
   schedule_sampler: "uniform"
   type: "Denoise" # or Deblur
@@ -23,7 +23,7 @@ diffusion:
     rescale_learned_sigmas: False
     timestep_respacing: ""
     lmbd_vlb: 0.001
-    lmbd_xs_count: 0.005
+    lmbd_xs_count: 0.0
     lmbd_cb_count: 0.0
     t_mse_weighting_scheme: "uniform"
     t_xs_count_weighting_scheme: "exp"
@@ -32,18 +32,18 @@ diffusion:
 model:
   type: "UNet" # or DiT
   params:
-    input_size: 64
+    input_size: 32
     in_channels: 8
     model_channels: 32
     out_channels: 4
     num_res_blocks: 2
-    attention_resolutions: [32, 16, 8]
+    attention_resolutions: [4, 2]
     dropout: 0.0
-    channel_mult: [1, 2, 3, 4]
+    channel_mult: [1, 2, 4]
     conv_resample: True
     dims: 2
     y_dim: null
-    context_dim: null
+    context_dim: 256
     use_checkpoint: True
     num_heads: 1
     num_head_channels: -1
@@ -53,12 +53,22 @@ model:
     adalnzero: False
     learn_count: False
     learn_sigma: *learn_sigma
+    transformer_depth: [1, 2, 2]
 
 conditioner:
   embedders:
     - type: "ImageConcatEmbedder"
       input_keys: ["img"]
       is_trainable: False
+
+    - type: "RoIAlignExemplarEmbedder"
+      input_keys: ["img", "bboxes"]
+      is_trainable: True
+      params:
+        input_channels: 4
+        roi_output_size: 7
+        out_channels: 256
+        remove_sequence_dim: False
 
     # - type: "ViTExemplarEmbedder"
     #   input_keys: ["img", "bboxes"]
@@ -78,13 +88,13 @@ data:
       datadir: ../FSC147_384_V2/
       targetdir: densitymaps/debugging
       n_exemplars: 3
-      image_size: 512
+      image_size: 256
       hflip_p: 0.5
       cj_p: 0.0
       sigma: 0.5
       center_pad: True
-      bbox_max_size: 50
-      bbox_min_size: 10
+      bbox_max_size: null
+      bbox_min_size: null
       allow_resize_target: False
       target_minmax_norm: True
 
