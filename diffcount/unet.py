@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from einops import rearrange
 
-
+from .conditioning import RoIAlignExemplarEmbedder
 from .attention import BasicTransformerBlock
 from .dit import DiTBlock
 from .count_utils import CountingBranch
@@ -40,13 +40,13 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
 	support it as an extra input.
 	"""
 	# def forward(self, x, emb, y=None, context=None):
-	def forward(self, x, emb, context=None):
+	def forward(self, x, emb, context=None, bboxes=None):
 		for layer in self:
 			if isinstance(layer, TimestepBlock):
 				x = layer(x, emb)
 			elif isinstance(layer, SpatialTransformer):
 				# x = layer(x, y=y, context=context)
-				x = layer(x, y=emb, context=context)
+				x = layer(x, y=emb, context=context, bboxes=bboxes)
 			else:
 				x = layer(x)
 		return x
@@ -247,14 +247,17 @@ class SpatialTransformer(nn.Module):
 		in_channels,
 		n_heads,
 		d_head,
+		time_embed_dim,
+		ds,
 		depth=1,
 		dropout=0.,
 		context_dim=None,
-		y_dim=None,
 		adalnzero=False,
+		bbox_embed_kwargs=None,
 	):
 		super().__init__()
 
+		# assert roi_spatial_scale is not None and roi_out_channels is not None
 		if d_head == -1:
 			d_head = in_channels // n_heads
 		else:
@@ -278,7 +281,22 @@ class SpatialTransformer(nn.Module):
 		# 	[BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim)
 		# 		for d in range(depth)]
 		# )
-
+		if bbox_embed_kwargs is not None:
+			self.bbox_embed = RoIAlignExemplarEmbedder(
+				input_channels=inner_dim,
+				roi_output_size=bbox_embed_kwargs.roi_output_size,
+				out_channels=bbox_embed_kwargs.roi_out_channels,
+				hidden_channels=bbox_embed_kwargs.roi_hidden_channels,
+				spatial_scale=bbox_embed_kwargs.roi_initial_spatial_scale / ds,
+				remove_sequence_dim=adalnzero,
+			)
+			if self.adalnzero:
+				assert bbox_embed_kwargs.y_embed_in_channels is not None
+				self.y_embed = nn.Sequential(
+					nn.Linear(bbox_embed_kwargs.y_embed_in_channels, time_embed_dim),
+					nn.SiLU(),
+					nn.Linear(time_embed_dim, time_embed_dim),
+				)
 
 		self.transformer_blocks = nn.ModuleList(
 			[
@@ -294,7 +312,7 @@ class SpatialTransformer(nn.Module):
 					n_heads,
 					dim_head=d_head,
 					dropout=dropout,
-					adaln_input_size=y_dim,
+					adaln_input_size=time_embed_dim,
 				)
 				for _ in range(depth)
 			]
@@ -304,20 +322,30 @@ class SpatialTransformer(nn.Module):
 											  in_channels,
 											  kernel_size=1,
 											  stride=1,
-											  padding=0))	
+											  padding=0))
 
-	def forward(self, x, y=None, context=None):
+
+	def forward(self, x, y=None, context=None, bboxes=None):
 		# note: if no context is given, cross-attention defaults to self-attention
 		b, c, h, w = x.shape
 		x_in = x
 		x = self.norm(x)
 		x = self.proj_in(x)
+		if bboxes is not None:
+			ex_emb = self.bbox_embed(x, bboxes)
+			if self.adalnzero:
+				y = y + self.y_embed(ex_emb)
+			else:
+				context = ex_emb if context is None else th.cat((context, ex_emb), dim=2)
+
+		c = y if self.adalnzero else context
 		x = rearrange(x, 'b c h w -> b (h w) c')
 		for block in self.transformer_blocks:
-			if self.adalnzero:
-				x = block(x, c=y)
-			else:
-				x = block(x, context=context)
+			x = block(x, c)
+			# if self.adalnzero:
+			# 	x = block(x, c=y)
+			# else:
+			# 	x = block(x, context=context)
 		x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
 		x = self.proj_out(x)
 		return x + x_in
@@ -356,7 +384,7 @@ class UNetModel(nn.Module):
 
 	def __init__(
 		self,
-		# image_size,
+		input_size,
 		in_channels,
 		model_channels,
 		out_channels,
@@ -377,13 +405,14 @@ class UNetModel(nn.Module):
 		adalnzero=False,
 		learn_count=False,
 		transformer_depth=1,
+		bbox_embed_kwargs=None,
 	):
 		super().__init__()
 
 		if num_heads_upsample == -1:
 			num_heads_upsample = num_heads
 
-		# self.image_size = image_size
+		self.input_size = input_size
 		self.in_channels = in_channels
 		self.model_channels = model_channels
 		self.out_channels = out_channels
@@ -459,11 +488,12 @@ class UNetModel(nn.Module):
 							n_heads=num_heads, 
 							d_head=num_head_channels,
 							depth=transformer_depth[level],
-							y_dim=time_embed_dim,
+							time_embed_dim=time_embed_dim,
+							ds=ds,
 							context_dim=context_dim,
 							adalnzero=adalnzero,
+							bbox_embed_kwargs=bbox_embed_kwargs,
 						)
-	  
 					)
 				self.input_blocks.append(TimestepEmbedSequential(*layers))
 				self._feature_size += ch
@@ -514,9 +544,11 @@ class UNetModel(nn.Module):
 				n_heads=num_heads, 
 				d_head=num_head_channels,
 				depth=transformer_depth_middle,
-				y_dim=time_embed_dim,
+				time_embed_dim=time_embed_dim,
+				ds=ds,
 				context_dim=context_dim,
 				adalnzero=adalnzero,
+				bbox_embed_kwargs=bbox_embed_kwargs,
 			),
 			ResBlock(
 				ch,
@@ -559,9 +591,11 @@ class UNetModel(nn.Module):
 							n_heads=num_heads, 
 							d_head=num_head_channels,
 							depth=transformer_depth[level],
-							y_dim=time_embed_dim,
+							time_embed_dim=time_embed_dim,
+							ds=ds,
 							context_dim=context_dim,
 							adalnzero=adalnzero,
+							bbox_embed_kwargs=bbox_embed_kwargs,
 						)
 					)
 				if level and i == num_res_blocks:
@@ -621,7 +655,7 @@ class UNetModel(nn.Module):
 		nn.init.normal_(self.time_embed[2].weight, std=0.02)
 
 
-	def _forward(self, x, timesteps, y=None, context=None):
+	def _forward(self, x, timesteps, y=None, context=None, bboxes=None):
 		"""
 		Apply the model to an input batch.
 
@@ -630,8 +664,6 @@ class UNetModel(nn.Module):
 		:param y: an [N] Tensor of labels, if class-conditional.
 		:return: an [N x C x ...] Tensor of outputs.
 		"""
-		assert (y is not None) == (self.y_dim is not None)
-
 		xs = []
 		en_feats = {}
 		de_feats = {}
@@ -642,15 +674,15 @@ class UNetModel(nn.Module):
 			emb = emb + self.y_embed(y)
 
 		for module in self.input_blocks:
-			x = module(x, emb, context=context)
+			x = module(x, emb, context=context, bboxes=bboxes)
 			xs.append(x)
 
-		x = self.middle_block(x, emb, context=context)
+		x = self.middle_block(x, emb, context=context, bboxes=bboxes)
 
 		for layer, module in enumerate(self.output_blocks):
 			e = xs.pop()
 			x = th.cat([x, e], dim=1)
-			x = module(x, emb, context=context)
+			x = module(x, emb, context=context, bboxes=bboxes)
 
 			if self.learn_count and layer in self.feat_extract_list:
 				en_feats[f"p{layer}"] = e.clone()
@@ -671,4 +703,5 @@ class UNetModel(nn.Module):
 			timesteps=t,
 			y=cond.get("vector", None),
 			context=cond.get("crossattn", None),
+			bboxes=cond.get("bboxes", None),
 		)

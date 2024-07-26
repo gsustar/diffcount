@@ -13,12 +13,12 @@ diffusion:
   schedule_sampler: "uniform"
   type: "Denoise" # or Deblur
   params:
-    diffusion_steps: 250
-    noise_schedule: linear
+    diffusion_steps: 1000
+    noise_schedule: scaled_linear
     learn_sigma: *learn_sigma
     sigma_small: False
     use_kl: False
-    predict_xstart: False
+    parametrization: "v"
     rescale_timesteps: False
     rescale_learned_sigmas: False
     timestep_respacing: ""
@@ -28,6 +28,7 @@ diffusion:
     t_mse_weighting_scheme: "uniform"
     t_xs_count_weighting_scheme: "exp"
     t_cb_count_weighting_scheme: "exp"
+    enforce_zero_terminal_snr: True
 
 model:
   type: "UNet" # or DiT
@@ -37,23 +38,29 @@ model:
     model_channels: 32
     out_channels: 4
     num_res_blocks: 2
-    attention_resolutions: [4, 2]
+    attention_resolutions: [32, 16, 8]
     dropout: 0.0
     channel_mult: [1, 2, 4]
     conv_resample: True
     dims: 2
     y_dim: null
-    context_dim: 256
+    context_dim: null
     use_checkpoint: True
     num_heads: 1
     num_head_channels: -1
     num_heads_upsample: -1
     use_scale_shift_norm: True
     resblock_updown: True
-    adalnzero: False
+    adalnzero: True
     learn_count: False
     learn_sigma: *learn_sigma
-    transformer_depth: [1, 2, 2]
+    transformer_depth: 1
+    bbox_embed_kwargs:
+      roi_out_channels: 256
+      roi_output_size: 7
+      roi_hidden_channels: 32
+      roi_initial_spatial_scale: 0.125
+      y_embed_in_channels: 768
 
 conditioner:
   embedders:
@@ -61,14 +68,18 @@ conditioner:
       input_keys: ["img"]
       is_trainable: False
 
-    - type: "RoIAlignExemplarEmbedder"
-      input_keys: ["img", "bboxes"]
-      is_trainable: True
-      params:
-        input_channels: 4
-        roi_output_size: 7
-        out_channels: 256
-        remove_sequence_dim: False
+    - type: "BBoxAppendEmbedder"
+      input_keys: ["bboxes"]
+      is_trainable: False
+
+    # - type: "RoIAlignExemplarEmbedder"
+    #   input_keys: ["img", "bboxes"]
+    #   is_trainable: True
+    #   params:
+    #     input_channels: 4
+    #     roi_output_size: 7
+    #     out_channels: 256
+    #     remove_sequence_dim: False
 
     # - type: "ViTExemplarEmbedder"
     #   input_keys: ["img", "bboxes"]
@@ -106,10 +117,10 @@ data:
 train:
   lr: 1.e-4
   num_epochs: 10000
-  grad_clip: -1.0
+  grad_clip: 1.0
   use_fp16: False
   ema_rate: 0.9999
-  validation_interval: 1000
+  validation_interval: 10000
   resume_checkpoint: null
   weight_decay: 0.0
   lr_scheduler: null

@@ -21,7 +21,7 @@ class AbstractEmbModel(nn.Module):
 
 class Conditioner(nn.Module):
 	OUTPUT_DIM2KEYS = {2: "vector", 3: "crossattn", 4: "concat", 5: "concat"}
-	KEY2CATDIM = {"vector": 1, "crossattn": 2, "concat": 1}
+	KEY2CATDIM = {"vector": 1, "crossattn": 2, "concat": 1, "bboxes": 1}
 
 	def __init__(self, emb_models):
 		super().__init__()
@@ -54,7 +54,10 @@ class Conditioner(nn.Module):
 			if not isinstance(emb_out, (list, tuple)):
 				emb_out = [emb_out]
 			for emb in emb_out:
-				out_key = self.OUTPUT_DIM2KEYS[emb.dim()]
+				if isinstance(embedder, BBoxAppendEmbedder):
+					out_key = "bboxes"
+				else:
+					out_key = self.OUTPUT_DIM2KEYS[emb.dim()]
 				if out_key in output:
 					output[out_key] = th.cat(
 						(output[out_key], emb), self.KEY2CATDIM[out_key]
@@ -84,6 +87,14 @@ class ImageConcatEmbedder(AbstractEmbModel):
 
 	def forward(self, img):
 		return img
+	
+
+class BBoxAppendEmbedder(AbstractEmbModel):
+	def __init__(self):
+		super().__init__()
+
+	def forward(self, bboxes):
+		return bboxes
 
 
 class ViTExemplarEmbedder(AbstractEmbModel):
@@ -246,13 +257,3 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 		if self.remove_sequence_dim:
 			x = x.reshape(bs, -1)
 		return x
-
-
-
-class YOLOExemplarEmbedder(AbstractEmbModel):
-	
-	def __init__(self):
-		pass
-
-	def forward(self, img, bboxes):
-		pass

@@ -151,6 +151,7 @@ def create_unet_model(
 	learn_count,
 	adalnzero,
 	transformer_depth,
+	bbox_embed_kwargs,
 ):
 	if channel_mult is None:
 		if input_size == 512:
@@ -171,7 +172,7 @@ def create_unet_model(
 		attention_ds.append(input_size // int(res))
 
 	return UNetModel(
-		# image_size=image_size,
+		input_size=input_size,
 		in_channels=in_channels,
 		model_channels=model_channels,
 		out_channels=(out_channels if not learn_sigma else 2 * out_channels),
@@ -192,6 +193,7 @@ def create_unet_model(
 		adalnzero=adalnzero,
 		learn_count=learn_count,
 		transformer_depth=transformer_depth,
+		bbox_embed_kwargs=bbox_embed_kwargs,
 	)
 
 
@@ -241,7 +243,7 @@ def create_denoise_diffusion(
 	sigma_small,
 	noise_schedule,
 	use_kl,
-	predict_xstart,
+	parametrization,
 	rescale_timesteps,
 	rescale_learned_sigmas,
 	timestep_respacing,
@@ -251,8 +253,30 @@ def create_denoise_diffusion(
 	t_mse_weighting_scheme,
 	t_xs_count_weighting_scheme,
 	t_cb_count_weighting_scheme,
+	enforce_zero_terminal_snr,
 ):
+	_model_mean_type = dd.ModelMeanType.EPSILON
+	if parametrization == "xstart":
+		_model_mean_type = dd.ModelMeanType.START_X
+	elif parametrization == "eps":
+		_model_mean_type = dd.ModelMeanType.EPSILON
+	elif parametrization == "xprev":
+		_model_mean_type = dd.ModelMeanType.PREVIOUS_X
+	elif parametrization == "v":
+		_model_mean_type = dd.ModelMeanType.V
+	else:
+		raise ValueError(f"Unsupported model mean parametrization: {parametrization}")
+	
 	betas = dd.get_named_beta_schedule(noise_schedule, diffusion_steps)
+	if enforce_zero_terminal_snr:
+		assert parametrization == "v", ("Zero terminal SNR is only viable when using V parametrization.")
+		if noise_schedule == "linear" or noise_schedule == "scaled_linear":
+			betas = dd.enforce_zero_terminal_snr(betas)
+		elif noise_schedule == "cosine":
+			betas = dd.get_named_beta_schedule(noise_schedule, diffusion_steps, max_beta=1.0)
+		else:
+			raise ValueError(f"Zero terminal SNR is not supported for {noise_schedule} noise schedule.")
+
 	if use_kl:
 		loss_type = dd.LossType.RESCALED_KL
 	elif rescale_learned_sigmas:
@@ -264,9 +288,7 @@ def create_denoise_diffusion(
 	return SpacedDiffusion(
 		use_timesteps=space_timesteps(diffusion_steps, timestep_respacing),
 		betas=betas,
-		model_mean_type=(
-			dd.ModelMeanType.EPSILON if not predict_xstart else dd.ModelMeanType.START_X
-		),
+		model_mean_type=_model_mean_type,
 		model_var_type=(
 			(
 				dd.ModelVarType.FIXED_LARGE

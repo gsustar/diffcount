@@ -238,7 +238,7 @@ class DiT(nn.Module):
 			y = self.y_embedder(y)    			 # (N, D)
 			c += y                               # (N, D)
 		for block in self.blocks:
-			x = block(x, c, context)             # (N, T, D)
+			x = block(x, c)             # (N, T, D)
 		x = self.final_layer(x, c)               # (N, T, patch_size ** 2 * out_channels)
 		x = self.unpatchify(x)                   # (N, out_channels, H, W)
 		return x

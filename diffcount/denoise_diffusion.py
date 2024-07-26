@@ -12,12 +12,11 @@ import numpy as np
 import torch as th
 
 from .nn import mean_flat
-from .count_utils import XSCountPredictor
 from .losses import normal_kl, discretized_gaussian_log_likelihood
 from .base_diffusion import BaseDiffusion
 
 
-def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
+def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, max_beta=0.999):
 	"""
 	Get a pre-defined beta schedule for the given name.
 
@@ -35,10 +34,18 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
 		return np.linspace(
 			beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
 		)
+	elif schedule_name == "scaled_linear":
+		scale = 1000 / num_diffusion_timesteps
+		beta_start = scale * 0.0001
+		beta_end = scale * 0.02
+		return np.linspace(
+			beta_start**0.5, beta_end**0.5, num_diffusion_timesteps, dtype=np.float64
+		) ** 2
 	elif schedule_name == "cosine":
 		return betas_for_alpha_bar(
 			num_diffusion_timesteps,
 			lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
+			max_beta=max_beta
 		)
 	else:
 		raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
@@ -81,6 +88,32 @@ def get_t_weighting_scheme(name, num_difusion_timesteps, lmbd_t, snr):
 	return t_weights
 
 
+def enforce_zero_terminal_snr(betas):
+	# Convert betas to sqrt_alphas_cumprod
+	alphas = 1.0 - betas
+	alphas_cumprod = np.cumprod(alphas, axis=0)
+	sqrt_alphas_cumprod = np.sqrt(alphas_cumprod)
+
+	# Store old values.
+	sqrt_alphas_cumprod_0 = sqrt_alphas_cumprod[0].copy()
+	sqrt_alphas_cumprod_T = sqrt_alphas_cumprod[-1].copy()
+
+	# Shift so last timestep is zero.
+	sqrt_alphas_cumprod -= sqrt_alphas_cumprod_T
+	# Scale so first timestep is back to old value.
+	sqrt_alphas_cumprod *= sqrt_alphas_cumprod_0 / (
+		sqrt_alphas_cumprod_0 - sqrt_alphas_cumprod_T
+	)
+
+	# Convert alphas_bar_sqrt to betas
+	alphas_cumprod = sqrt_alphas_cumprod ** 2
+	alphas = alphas_cumprod[1:] / alphas_cumprod[:-1]
+	alphas = np.concatenate((alphas_cumprod[0:1], alphas))
+	# alphas = th.cat([alphas_cumprod[0:1], alphas])
+	betas = 1 - alphas
+	return betas
+
+
 class ModelMeanType(enum.Enum):
 	"""
 	Which type of output the model predicts.
@@ -89,6 +122,7 @@ class ModelMeanType(enum.Enum):
 	PREVIOUS_X = enum.auto()  # the model predicts x_{t-1}
 	START_X = enum.auto()  # the model predicts x_0
 	EPSILON = enum.auto()  # the model predicts epsilon
+	V = enum.auto()
 
 
 class ModelVarType(enum.Enum):
@@ -204,7 +238,6 @@ class DenoiseDiffusion(BaseDiffusion):
 			* (1.0 - self.alphas_cumprod) 
 			/ betas
 		)
-
 		self.t_mse_weights = get_t_weighting_scheme(
 			self.t_mse_weighting_scheme, 
 			self.num_timesteps, 
@@ -223,10 +256,6 @@ class DenoiseDiffusion(BaseDiffusion):
 			self.lmbd_t,
 			self.snr
 		)
-		# self.xs_count_predictor = XSCountPredictor(
-		# 	input_dim=input_size*input_size*out_channels, 
-		# 	hidden_dim=128
-		# )
 
 
 	def q_mean_variance(self, x_start, t):
@@ -363,9 +392,13 @@ class DenoiseDiffusion(BaseDiffusion):
 				self._predict_xstart_from_xprev(x_t=x, t=t, xprev=model_output)
 			)
 			model_mean = model_output
-		elif self.model_mean_type in [ModelMeanType.START_X, ModelMeanType.EPSILON]:
+		elif self.model_mean_type in [ModelMeanType.START_X, ModelMeanType.EPSILON, ModelMeanType.V]:
 			if self.model_mean_type == ModelMeanType.START_X:
 				pred_xstart = process_xstart(model_output)
+			elif self.model_mean_type == ModelMeanType.V:
+				pred_xstart = process_xstart(
+					self._predict_start_from_v(x_t=x, t=t, v=model_output)
+				)
 			else:
 				pred_xstart = process_xstart(
 					self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output)
@@ -385,6 +418,18 @@ class DenoiseDiffusion(BaseDiffusion):
 			"log_variance": model_log_variance,
 			"pred_xstart": pred_xstart,
 		}
+
+	def _predict_v(self, x_start, t, noise):
+		return (
+			_extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * noise -
+			_extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_start
+		)
+
+	def _predict_start_from_v(self, x_t, t, v):
+		return (
+			_extract_into_tensor(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t -
+			_extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
+		)
 
 	def _predict_xstart_from_eps(self, x_t, t, eps):
 		assert x_t.shape == eps.shape
@@ -640,11 +685,13 @@ class DenoiseDiffusion(BaseDiffusion):
 					# Without a factor of 1/1000, the VB term hurts the MSE term.
 					terms["vb"] *= self.num_timesteps / 1000.0
 
-			# todo: try V prametrization and x_start parametrization
 			target = {
 				ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
 					x_start=x_start, x_t=x_t, t=t
 				)[0],
+				ModelMeanType.V: self._predict_v(
+					x_start=x_start, t=t, noise=noise
+				),
 				ModelMeanType.START_X: x_start,
 				ModelMeanType.EPSILON: noise,
 			}[self.model_mean_type]
@@ -657,6 +704,8 @@ class DenoiseDiffusion(BaseDiffusion):
 						pred_xstart = model_output
 					elif self.model_mean_type == ModelMeanType.EPSILON:
 						pred_xstart = self._predict_xstart_from_eps(x_t, t, model_output)
+					elif self.model_mean_type == ModelMeanType.V:
+						pred_xstart = self._predict_start_from_v(x_t, t, model_output)
 					elif self.model_mean_type == ModelMeanType.PREVIOUS_X:
 						pred_xstart = self._predict_xstart_from_xprev(x_t, t, model_output)
 					else:
