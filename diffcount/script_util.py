@@ -141,6 +141,7 @@ def create_unet_model(
 	dims,
 	context_dim,
 	y_dim,
+	bbox_dim,
 	use_checkpoint,
 	num_heads,
 	num_head_channels,
@@ -151,7 +152,8 @@ def create_unet_model(
 	learn_count,
 	adalnzero,
 	transformer_depth,
-	bbox_embed_kwargs,
+	initial_ds,
+	num_bboxes,
 ):
 	if channel_mult is None:
 		if input_size == 512:
@@ -184,6 +186,7 @@ def create_unet_model(
 		dims=dims,
 		context_dim=context_dim,
 		y_dim=y_dim,
+		bbox_dim=bbox_dim,
 		use_checkpoint=use_checkpoint,
 		num_heads=num_heads,
 		num_head_channels=num_head_channels,
@@ -193,7 +196,8 @@ def create_unet_model(
 		adalnzero=adalnzero,
 		learn_count=learn_count,
 		transformer_depth=transformer_depth,
-		bbox_embed_kwargs=bbox_embed_kwargs,
+		initial_ds=initial_ds,
+		num_bboxes=num_bboxes,
 	)
 
 

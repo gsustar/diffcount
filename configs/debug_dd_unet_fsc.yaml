@@ -44,23 +44,20 @@ model:
     conv_resample: True
     dims: 2
     y_dim: null
-    context_dim: null
+    context_dim: 256
     use_checkpoint: True
     num_heads: 1
     num_head_channels: -1
     num_heads_upsample: -1
     use_scale_shift_norm: True
     resblock_updown: True
-    adalnzero: True
+    adalnzero: False
     learn_count: False
     learn_sigma: *learn_sigma
     transformer_depth: 1
-    bbox_embed_kwargs:
-      roi_out_channels: 256
-      roi_output_size: 7
-      roi_hidden_channels: 32
-      roi_initial_spatial_scale: 0.125
-      y_embed_in_channels: 768
+    initial_ds: 0.125
+    num_bboxes: 3
+    bbox_dim: null
 
 conditioner:
   embedders:
@@ -68,18 +65,18 @@ conditioner:
       input_keys: ["img"]
       is_trainable: False
 
-    - type: "BBoxAppendEmbedder"
-      input_keys: ["bboxes"]
-      is_trainable: False
+    # - type: "BBoxAppendEmbedder"
+    #   input_keys: ["bboxes"]
+    #   is_trainable: False
 
-    # - type: "RoIAlignExemplarEmbedder"
-    #   input_keys: ["img", "bboxes"]
-    #   is_trainable: True
-    #   params:
-    #     input_channels: 4
-    #     roi_output_size: 7
-    #     out_channels: 256
-    #     remove_sequence_dim: False
+    - type: "RoIAlignExemplarEmbedder"
+      input_keys: ["img", "bboxes"]
+      is_trainable: True
+      params:
+        in_channels: 4
+        roi_output_size: 7
+        out_channels: 256
+        remove_sequence_dim: False
 
     # - type: "ViTExemplarEmbedder"
     #   input_keys: ["img", "bboxes"]

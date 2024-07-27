@@ -248,16 +248,15 @@ class SpatialTransformer(nn.Module):
 		n_heads,
 		d_head,
 		time_embed_dim,
-		ds,
 		depth=1,
 		dropout=0.,
 		context_dim=None,
 		adalnzero=False,
-		bbox_embed_kwargs=None,
+		bbox_embed=None,
+		bbox_y_embed=None,
 	):
 		super().__init__()
 
-		# assert roi_spatial_scale is not None and roi_out_channels is not None
 		if d_head == -1:
 			d_head = in_channels // n_heads
 		else:
@@ -270,33 +269,14 @@ class SpatialTransformer(nn.Module):
 		self.in_channels = in_channels
 		inner_dim = n_heads * d_head
 		self.norm = nn.GroupNorm(32, in_channels, eps=1e-6, affine=True)
+		self.bbox_embed = bbox_embed
+		self.bbox_y_embed = bbox_y_embed
 
 		self.proj_in = nn.Conv2d(in_channels,
 								 inner_dim,
 								 kernel_size=1,
 								 stride=1,
 								 padding=0)
-
-		# self.transformer_blocks = nn.ModuleList(
-		# 	[BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim)
-		# 		for d in range(depth)]
-		# )
-		if bbox_embed_kwargs is not None:
-			self.bbox_embed = RoIAlignExemplarEmbedder(
-				input_channels=inner_dim,
-				roi_output_size=bbox_embed_kwargs.roi_output_size,
-				out_channels=bbox_embed_kwargs.roi_out_channels,
-				hidden_channels=bbox_embed_kwargs.roi_hidden_channels,
-				spatial_scale=bbox_embed_kwargs.roi_initial_spatial_scale / ds,
-				remove_sequence_dim=adalnzero,
-			)
-			if self.adalnzero:
-				assert bbox_embed_kwargs.y_embed_in_channels is not None
-				self.y_embed = nn.Sequential(
-					nn.Linear(bbox_embed_kwargs.y_embed_in_channels, time_embed_dim),
-					nn.SiLU(),
-					nn.Linear(time_embed_dim, time_embed_dim),
-				)
 
 		self.transformer_blocks = nn.ModuleList(
 			[
@@ -332,12 +312,16 @@ class SpatialTransformer(nn.Module):
 		x = self.norm(x)
 		x = self.proj_in(x)
 		if bboxes is not None:
+			assert self.bbox_embed is not None
 			ex_emb = self.bbox_embed(x, bboxes)
 			if self.adalnzero:
-				y = y + self.y_embed(ex_emb)
+				assert self.bbox_y_embed is not None
+				y = y + self.bbox_y_embed(ex_emb)
 			else:
-				context = ex_emb if context is None else th.cat((context, ex_emb), dim=2)
-
+				context = (
+					ex_emb if context is None else 
+					th.cat((context, ex_emb), dim=2)
+			   )
 		c = y if self.adalnzero else context
 		x = rearrange(x, 'b c h w -> b (h w) c')
 		for block in self.transformer_blocks:
@@ -405,9 +389,14 @@ class UNetModel(nn.Module):
 		adalnzero=False,
 		learn_count=False,
 		transformer_depth=1,
-		bbox_embed_kwargs=None,
+		initial_ds=1.0,
+		bbox_dim=None,
+		num_bboxes=None,
 	):
 		super().__init__()
+
+		if not adalnzero and bbox_dim is not None:
+			assert bbox_dim == context_dim
 
 		if num_heads_upsample == -1:
 			num_heads_upsample = num_heads
@@ -444,14 +433,44 @@ class UNetModel(nn.Module):
 		if y_dim is not None:
 			self.y_embed = nn.Sequential(
 				nn.Linear(y_dim, time_embed_dim),
-				# nn.Linear(y_dim, inner_dim),
 				nn.SiLU(),
-				# nn.Linear(inner_dim, inner_dim),
 				nn.Linear(time_embed_dim, time_embed_dim),
 			)
 
-		# if self.num_classes is not None:
-		# 	self.label_emb = nn.Embedding(num_classes, time_embed_dim)
+		self.bbox_y_embed = None
+		self.ex_embedders = [None] * len(channel_mult)
+		if num_bboxes and bbox_dim:
+			ds_ = 1
+			self.ex_embedders = nn.ModuleList([])
+			for level, mult in enumerate(channel_mult):
+				if ds_ in attention_resolutions:
+					ch_ = int(mult * model_channels)
+					d_head = num_head_channels
+					n_heads = num_heads
+					if d_head == -1:
+						d_head = ch_ // n_heads
+					else:
+						n_heads = ch_ // d_head
+					inner_dim = n_heads * d_head
+					self.ex_embedders.append(
+						RoIAlignExemplarEmbedder(
+							in_channels=inner_dim,
+							roi_output_size=7,
+							out_channels=bbox_dim,
+							spatial_scale=(initial_ds / ds_),
+							remove_sequence_dim=adalnzero,
+						)
+					)
+				else:
+					self.ex_embedders.append(None)
+				ds_ *= 2
+
+			if adalnzero:
+				self.bbox_y_embed = nn.Sequential(
+					nn.Linear(bbox_dim * num_bboxes, time_embed_dim),
+					nn.SiLU(),
+					nn.Linear(time_embed_dim, time_embed_dim)
+				)
 
 		ch = input_ch = int(channel_mult[0] * model_channels)
 		self.input_blocks = nn.ModuleList(
@@ -476,23 +495,16 @@ class UNetModel(nn.Module):
 				ch = int(mult * model_channels)
 				if ds in attention_resolutions:
 					layers.append(
-						# AttentionBlock(
-						# 	ch,
-						# 	use_checkpoint=use_checkpoint,
-						# 	num_heads=num_heads,
-						# 	num_head_channels=num_head_channels,
-						# 	use_new_attention_order=use_new_attention_order,
-						# )
 	  					SpatialTransformer(
 							ch, 
 							n_heads=num_heads, 
 							d_head=num_head_channels,
 							depth=transformer_depth[level],
 							time_embed_dim=time_embed_dim,
-							ds=ds,
 							context_dim=context_dim,
 							adalnzero=adalnzero,
-							bbox_embed_kwargs=bbox_embed_kwargs,
+							bbox_embed=self.ex_embedders[level],
+							bbox_y_embed=self.bbox_y_embed
 						)
 					)
 				self.input_blocks.append(TimestepEmbedSequential(*layers))
@@ -532,23 +544,16 @@ class UNetModel(nn.Module):
 				use_checkpoint=use_checkpoint,
 				use_scale_shift_norm=use_scale_shift_norm,
 			),
-			# AttentionBlock(
-			# 	ch,
-			# 	use_checkpoint=use_checkpoint,
-			# 	num_heads=num_heads,
-			# 	num_head_channels=num_head_channels,
-			# 	use_new_attention_order=use_new_attention_order,
-			# )
 			SpatialTransformer(
 				ch, 
 				n_heads=num_heads, 
 				d_head=num_head_channels,
 				depth=transformer_depth_middle,
 				time_embed_dim=time_embed_dim,
-				ds=ds,
 				context_dim=context_dim,
 				adalnzero=adalnzero,
-				bbox_embed_kwargs=bbox_embed_kwargs,
+				bbox_embed=self.ex_embedders[-1],
+				bbox_y_embed=self.bbox_y_embed
 			),
 			ResBlock(
 				ch,
@@ -579,23 +584,16 @@ class UNetModel(nn.Module):
 				ch = int(model_channels * mult)
 				if ds in attention_resolutions:
 					layers.append(
-						# AttentionBlock(
-						# 	ch,
-						# 	use_checkpoint=use_checkpoint,
-						# 	num_heads=num_heads_upsample,
-						# 	num_head_channels=num_head_channels,
-						# 	use_new_attention_order=use_new_attention_order,
-						# )
 	  					SpatialTransformer(
 							ch, 
 							n_heads=num_heads, 
 							d_head=num_head_channels,
 							depth=transformer_depth[level],
 							time_embed_dim=time_embed_dim,
-							ds=ds,
 							context_dim=context_dim,
 							adalnzero=adalnzero,
-							bbox_embed_kwargs=bbox_embed_kwargs,
+							bbox_embed=self.ex_embedders[level],
+							bbox_y_embed=self.bbox_y_embed
 						)
 					)
 				if level and i == num_res_blocks:
