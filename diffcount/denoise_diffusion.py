@@ -77,7 +77,7 @@ def get_t_weighting_scheme(name, num_difusion_timesteps, lmbd_t, snr):
 		p2 = lmbd_t / (k + snr) ** gamma
 		t_weights = (p2 - p2.min()) / (p2.max() - p2.min())
 	elif name == "exp":
-		k = 25.0
+		k = 40.0
 		t_weights = (
 			1 - (np.exp(-k * (np.arange(num_difusion_timesteps) / num_difusion_timesteps)) - 1) / (np.exp(-k) - 1)
 		)

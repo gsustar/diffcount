@@ -24,6 +24,9 @@ def assert_config(config):
 	for att in ["model", "diffusion", "data", "log"]:
 		assert hasattr(config, att), f"config missing attribute: {att}"
 
+	assert config.model.params.learn_count == (config.diffusion.params.lmbd_cb_count > 0.0), (
+		"Ayo, don't set learn_count to False if lmbd_cb_count > 1.0"
+	)
 	assert config.model.params.learn_sigma == config.diffusion.params.learn_sigma
 	assert not hasattr(config.data.dataset.params, "split")
 

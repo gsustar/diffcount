@@ -24,7 +24,7 @@ diffusion:
     timestep_respacing: ""
     lmbd_vlb: 0.001
     lmbd_xs_count: 0.0
-    lmbd_cb_count: 0.0
+    lmbd_cb_count: 0.005
     t_mse_weighting_scheme: "uniform"
     t_xs_count_weighting_scheme: "exp"
     t_cb_count_weighting_scheme: "exp"

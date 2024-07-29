@@ -326,10 +326,6 @@ class SpatialTransformer(nn.Module):
 		x = rearrange(x, 'b c h w -> b (h w) c')
 		for block in self.transformer_blocks:
 			x = block(x, c)
-			# if self.adalnzero:
-			# 	x = block(x, c=y)
-			# else:
-			# 	x = block(x, context=context)
 		x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
 		x = self.proj_out(x)
 		return x + x_in
@@ -444,22 +440,13 @@ class UNetModel(nn.Module):
 			for level, mult in enumerate(channel_mult):
 				if ds_ in attention_resolutions:
 					ch_ = int(mult * model_channels)
-					d_head = num_head_channels
-					n_heads = num_heads
-
-					if d_head == -1:
-						d_head = ch_ // n_heads
-					else:
-						n_heads = ch_ // d_head
-					inner_dim = n_heads * d_head
-
 					if bbox_dim == "adaptive":
 						assert not adalnzero and context_dim is None
-						context_dims[level] = inner_dim
+						context_dims[level] = ch_
 
 					self.ex_embedders.append(
 						RoIAlignExemplarEmbedder(
-							in_channels=inner_dim,
+							in_channels=ch_,
 							roi_output_size=7,
 							out_channels=bbox_dim,
 							spatial_scale=(initial_ds / ds_),
