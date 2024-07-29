@@ -4,8 +4,6 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
-from einops import rearrange
-
 
 def remove_background(density, eps=0.1):
 	avg = density.mean(dim=(1,2,3), keepdim=True)
@@ -61,7 +59,7 @@ class XSCountPredictor(nn.Module):
 		)
 
 	def forward(self, x):
-		x = rearrange(x, 'b c h w-> b (c h w)')
+		x = x.flatten(start_dim=1)
 		x = self.norm(x)
 		x = self.mlp(x)
 		return x
@@ -86,7 +84,8 @@ class CountingBranch(nn.Module):
 	def forward(self, feats):
 		x = [feats[key] for key in feats]
 		x = th.cat([self.avgpool(feats[key]) for key in feats], dim=1)
-		x = rearrange(x, 'b c h w-> b (c h w)')
+		x = x.flatten(start_dim=1)
+		# x = rearrange(x, 'b c h w-> b (c h w)')
 		x = self.norm(x)
 		x = self.mlp(x)
 		return x

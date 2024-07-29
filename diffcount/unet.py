@@ -616,7 +616,7 @@ class UNetModel(nn.Module):
 			feat_dims = {
 				f"p{layer}": model_channels * mult for layer, mult in zip(self.feat_extract_list, channel_mult)
 			}
-			self.counting_branch = CountingBranch(feat_dims, hidden_dim=64, use_conv=False)
+			self.counting_branch = CountingBranch(feat_dims, hidden_dim=64)
 
 		self.out = nn.Sequential(
 			nn.GroupNorm(32, ch),
