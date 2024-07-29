@@ -230,6 +230,11 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 	):
 		super().__init__()
 
+		self.skip_fc = False
+		if out_channels == "adaptive":
+			out_channels = in_channels
+			self.skip_fc = True
+
 		self.in_channels = in_channels
 		self.roi_output_size = roi_output_size
 		self.out_channels = out_channels
@@ -237,12 +242,7 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 		self.remove_sequence_dim = remove_sequence_dim
 
 		self.avgpool = nn.AdaptiveAvgPool2d(1)
-		self.out = nn.Sequential(
-			nn.Linear(in_channels, out_channels),
-			nn.LayerNorm(out_channels),
-			nn.SiLU(),
-			nn.Linear(out_channels, out_channels)
-		)
+		self.fc1 = nn.Linear(in_channels, out_channels)
 
 	def forward(self, z, bboxes, ds=1.0):
 		bs, ch, _, _ = z.shape
@@ -256,7 +256,9 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 		)
 		x = self.avgpool(x)
 		x = x.reshape(bs, -1, x.shape[1])
-		x = self.out(x)
+
+		if not self.skip_fc:
+			x = self.fc1(x)
 
 		if self.remove_sequence_dim:
 			x = x.reshape(bs, -1)

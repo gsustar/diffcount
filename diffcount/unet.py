@@ -395,9 +395,6 @@ class UNetModel(nn.Module):
 	):
 		super().__init__()
 
-		if not adalnzero and bbox_dim is not None:
-			assert bbox_dim == context_dim
-
 		if num_heads_upsample == -1:
 			num_heads_upsample = num_heads
 
@@ -439,7 +436,9 @@ class UNetModel(nn.Module):
 
 		self.bbox_y_embed = None
 		self.ex_embedders = [None] * len(channel_mult)
-		if num_bboxes and bbox_dim:
+		context_dims = [context_dim] * len(channel_mult)
+		if bbox_dim is not None:
+			assert context_dim is None or context_dim == bbox_dim
 			ds_ = 1
 			self.ex_embedders = nn.ModuleList([])
 			for level, mult in enumerate(channel_mult):
@@ -447,11 +446,17 @@ class UNetModel(nn.Module):
 					ch_ = int(mult * model_channels)
 					d_head = num_head_channels
 					n_heads = num_heads
+
 					if d_head == -1:
 						d_head = ch_ // n_heads
 					else:
 						n_heads = ch_ // d_head
 					inner_dim = n_heads * d_head
+
+					if bbox_dim == "adaptive":
+						assert not adalnzero and context_dim is None
+						context_dims[level] = inner_dim
+
 					self.ex_embedders.append(
 						RoIAlignExemplarEmbedder(
 							in_channels=inner_dim,
@@ -466,6 +471,7 @@ class UNetModel(nn.Module):
 				ds_ *= 2
 
 			if adalnzero:
+				assert num_bboxes is not None
 				self.bbox_y_embed = nn.Sequential(
 					nn.Linear(bbox_dim * num_bboxes, time_embed_dim),
 					nn.SiLU(),
@@ -501,7 +507,7 @@ class UNetModel(nn.Module):
 							d_head=num_head_channels,
 							depth=transformer_depth[level],
 							time_embed_dim=time_embed_dim,
-							context_dim=context_dim,
+							context_dim=context_dims[level],
 							adalnzero=adalnzero,
 							bbox_embed=self.ex_embedders[level],
 							bbox_y_embed=self.bbox_y_embed
@@ -550,7 +556,7 @@ class UNetModel(nn.Module):
 				d_head=num_head_channels,
 				depth=transformer_depth_middle,
 				time_embed_dim=time_embed_dim,
-				context_dim=context_dim,
+				context_dim=context_dims[level],
 				adalnzero=adalnzero,
 				bbox_embed=self.ex_embedders[-1],
 				bbox_y_embed=self.bbox_y_embed
@@ -590,7 +596,7 @@ class UNetModel(nn.Module):
 							d_head=num_head_channels,
 							depth=transformer_depth[level],
 							time_embed_dim=time_embed_dim,
-							context_dim=context_dim,
+							context_dim=context_dims[level],
 							adalnzero=adalnzero,
 							bbox_embed=self.ex_embedders[level],
 							bbox_y_embed=self.bbox_y_embed
