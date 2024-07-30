@@ -72,10 +72,13 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 
 
 def get_t_weighting_scheme(name, num_difusion_timesteps, lmbd_t, snr):
-	if name == "p2":
+	if name == "p2norm":
 		k, gamma = 1.0, 0.5
 		p2 = lmbd_t / (k + snr) ** gamma
 		t_weights = (p2 - p2.min()) / (p2.max() - p2.min())
+	elif name == "p2":
+		k, gamma = 1.0, 0.5
+		t_weights = lmbd_t / (k + snr) ** gamma
 	elif name == "exp":
 		k = 40.0
 		t_weights = (

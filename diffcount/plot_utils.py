@@ -69,7 +69,7 @@ def draw_result(img, density, pred_count, target_count, pred_coords=None):
 	draw = ImageDraw.Draw(img)
 	if pred_coords is not None:
 		for coord in pred_coords:
-			draw.circle(coord, radius=1, fill=(255, 0, 0))
+			draw.circle(coord[::-1], radius=1, fill=(255, 0, 0))
 	font = ImageFont.load_default(size=10)
 	draw.text((0, 0), f"PR: {pred_count:>.1f}", fill="white", font=font)
 	draw.text((0, 12), f"GT: {target_count:>.1f}", fill="chartreuse", font=font)
