@@ -4,6 +4,7 @@ import torchvision
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 from torchvision.utils import make_grid
+import io
 
 def _ready_for_plotting(t):
 	return (
@@ -58,7 +59,7 @@ def draw_denoising_process(imgs):
 	return imgs
 
 
-def draw_result(img, density, pred_count, target_count):
+def draw_result(img, density, pred_count, target_count, pred_coords=None):
 	img = to_pil_image(img)
 	density = to_pil_image(density, cmap="viridis")
 
@@ -66,9 +67,12 @@ def draw_result(img, density, pred_count, target_count):
 	img.paste(density, (0, 0), density)
 
 	draw = ImageDraw.Draw(img)
+	if pred_coords is not None:
+		for coord in pred_coords:
+			draw.circle(coord, radius=1, fill=(255, 0, 0))
 	font = ImageFont.load_default(size=10)
 	draw.text((0, 0), f"PR: {pred_count:>.1f}", fill="white", font=font)
-	draw.text((0, 12), f"GT: {target_count:>.1f}", fill="green", font=font)
+	draw.text((0, 12), f"GT: {target_count:>.1f}", fill="chartreuse", font=font)
 	return img
 
 

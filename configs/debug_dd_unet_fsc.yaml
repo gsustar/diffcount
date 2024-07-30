@@ -24,7 +24,7 @@ diffusion:
     timestep_respacing: ""
     lmbd_vlb: 0.001
     lmbd_xs_count: 0.0
-    lmbd_cb_count: 0.005
+    lmbd_cb_count: 0.0
     t_mse_weighting_scheme: "uniform"
     t_xs_count_weighting_scheme: "exp"
     t_cb_count_weighting_scheme: "exp"
@@ -117,7 +117,7 @@ train:
   grad_clip: 1.0
   use_fp16: False
   ema_rate: 0.9999
-  validation_interval: 10000
+  validation_interval: 10
   resume_checkpoint: null
   weight_decay: 0.0
   lr_scheduler: null
@@ -127,4 +127,4 @@ log:
   logdir: ../experiments/dummy/
   wandb_mode: disabled
   log_interval: 10
-  save_interval: 10000
+  save_interval: 100000

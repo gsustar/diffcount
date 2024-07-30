@@ -5,8 +5,12 @@ import os.path as osp
 from diffcount import logger
 from diffcount.ema import ExponentialMovingAverage
 from diffcount.plot_utils import draw_result
-from diffcount.count_utils import pmax_threshold_count
-from diffcount.nn import torch_to
+from diffcount.count_utils import nms_count
+from diffcount.nn import (
+	torch_to, 
+	possibly_vae_decode, 
+	encode
+)
 from diffcount.script_util import (
 	create_model,
 	create_diffusion,
@@ -44,7 +48,12 @@ def main():
 	logger.log("creating diffusion...")
 	diffusion = create_diffusion(config.diffusion)
 
-	logger.log("creating dataloader...")
+	logger.log("creating VAE...")
+	vae = create_vae(
+		getattr(config, "vae", None), device=dev
+	)
+
+	logger.log("creating data...")
 	config.data.dataloader.params.overfit_single_batch = False
 	config.data.dataloader.params.batch_size = args.batch_size
 	_, val_data, test_data = create_data(config.data, train=False)
@@ -74,6 +83,7 @@ def main():
 		for i, (batch, cond) in enumerate(eval_data):
 			batch = torch_to(batch, dev)
 			cond = torch_to(cond, dev)
+			en_batch, en_cond = encode(batch.clone(), cond.copy(), vae)
 			sample_fn = (
 				diffusion.p_sample_loop if not use_ddim else diffusion.ddim_sample_loop
 			)
@@ -81,20 +91,22 @@ def main():
 				with ema.average_parameters(model.parameters()):
 					samples = sample_fn(
 						model,
-						batch.shape,
+						en_batch.shape,
 						model_kwargs=dict(
-							cond=conditioner(cond)
-						)
+							cond=conditioner(en_cond)
+						),
+						clip_denoised=False,
 					)
 		
 			target_count = cond["count"].float()
-			pred_count = pmax_threshold_count(samples).float()
+			samples = possibly_vae_decode(samples, vae, clip_decoded=True)
 
 			if not args.skip_plotting:
 				for j, s in enumerate(samples):
 					img = cond["img"][j].unsqueeze(0)
 					density = s.unsqueeze(0)
-					res = draw_result(img, density, pred_count[j], target_count[j])
+					pred_count, pred_coords = nms_count(s)
+					res = draw_result(img, density, float(pred_count), target_count[j], pred_coords)
 					logger.logimg(res, name=f"{i*args.batch_size + j}", step=f"{split}")
 
 			logger.log(f"{i+1}/{N}")

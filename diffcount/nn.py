@@ -171,6 +171,15 @@ def possibly_vae_decode(z, vae=None, clip_decoded=False):
 	return z
 
 
+@th.no_grad
+def encode(batch, cond, vae, encode_keys=["img"]):
+	batch = possibly_vae_encode(batch, vae)
+	for k in encode_keys:
+		if k in cond:
+			cond[k] = possibly_vae_encode(cond[k], vae)
+	return batch, cond
+
+
 def torch_to(x, *args, **kwargs):
 	if isinstance(x, th.Tensor):
 		return x.to(*args, **kwargs)

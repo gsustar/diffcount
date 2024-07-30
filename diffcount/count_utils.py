@@ -4,6 +4,8 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
+from skimage.feature import peak_local_max
+
 
 def remove_background(density, eps=0.1):
 	avg = density.mean(dim=(1,2,3), keepdim=True)
@@ -17,10 +19,6 @@ def sum_count(density):
 
 
 def threshold_count(density, threshold=0.0):
-	# fig, ax = plt.subplots(1, 1)
-	# ax.imshow((density > threshold).float()[0, 0], alpha=1.0, cmap='Reds')
-	# ax.imshow(density[0, 0])
-	# plt.show()
 	return (density > threshold).sum(dim=(1,2,3))
 
 
@@ -28,8 +26,16 @@ def pmax_threshold_count(density, p=0.5):
 	_max, _ = th.max(density.view(density.size(0), -1), dim=1)
 	_max = _max[:, None, None, None]
 	threshold = _max * p
-	# print(threshold.squeeze())
 	return threshold_count(density, threshold)
+
+
+def nms_count(density, eps=0.1):
+	density = density.clamp_(-1.0, 1.0).detach().cpu()
+	density = (density + 1.0) / 2.0
+	density = density.mean(dim=0).squeeze()
+	density[density < eps] = 0.0
+	coords = peak_local_max(density.numpy(), exclude_border=0)
+	return len(coords), coords
 
 
 def contour_count(density, threshold=0.0):
@@ -52,13 +58,16 @@ class XSCountPredictor(nn.Module):
 		self.hidden_dim = hidden_dim
 
 		self.norm = nn.LayerNorm(self.input_dim)
+		self.avgpool = nn.AdaptiveAvgPool2d(1)
 		self.mlp = nn.Sequential(
 			nn.Linear(self.input_dim, self.hidden_dim),
 			nn.ReLU(),
 			nn.Linear(self.hidden_dim, 1)
 		)
 
+	# todo check if work
 	def forward(self, x):
+		x = self.avgpool(x)
 		x = x.flatten(start_dim=1)
 		x = self.norm(x)
 		x = self.mlp(x)
@@ -85,7 +94,6 @@ class CountingBranch(nn.Module):
 		x = [feats[key] for key in feats]
 		x = th.cat([self.avgpool(feats[key]) for key in feats], dim=1)
 		x = x.flatten(start_dim=1)
-		# x = rearrange(x, 'b c h w-> b (c h w)')
 		x = self.norm(x)
 		x = self.mlp(x)
 		return x
@@ -96,7 +104,10 @@ if __name__ == "__main__":
 	x = th.tensor(np.load(path)).float()
 	# x[0] += 0.9
 	# x[3, 0, 25, 25] = 0.11
-	print(sum_count(x))
-	print(threshold_count(x, threshold=0.2))
-	print(pmax_threshold_count(x, p=0.4))
-	print(contour_count(x))
+	# print(sum_count(x))
+	# print(threshold_count(x, threshold=0.2))
+	# print(pmax_threshold_count(x, p=0.4))
+	# print(contour_count(x))
+	# plt.imshow(((x[0]+1) / 2).squeeze())
+	# plt.show()
+	print(nms_count(x[0]))

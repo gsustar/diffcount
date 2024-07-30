@@ -168,11 +168,11 @@ class FSC147(Dataset):
 
 
 	def __test_transfrom(self, img, bboxes):
-		pass
+		return self.__train_val_transform(img, bboxes)
 
 
 	def __test_val_transform(self, img, bboxes):
-		pass
+		return self.__train_val_transform(img, bboxes)
 
 
 	def transform(self, img, bboxes, split):
