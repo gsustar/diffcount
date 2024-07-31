@@ -71,14 +71,10 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
 	return np.array(betas)
 
 
-def get_t_weighting_scheme(name, num_difusion_timesteps, lmbd_t, snr):
-	if name == "p2norm":
+def get_t_weighting_scheme(name, num_difusion_timesteps, snr):
+	if name == "p2":
 		k, gamma = 1.0, 0.5
-		p2 = lmbd_t / (k + snr) ** gamma
-		t_weights = (p2 - p2.min()) / (p2.max() - p2.min())
-	elif name == "p2":
-		k, gamma = 1.0, 0.5
-		t_weights = lmbd_t / (k + snr) ** gamma
+		t_weights = 1.0 / (k + snr) ** gamma
 	elif name == "exp":
 		k = 40.0
 		t_weights = (
@@ -236,27 +232,19 @@ class DenoiseDiffusion(BaseDiffusion):
 		)
 
 		self.snr = 1.0 / (1 - self.alphas_cumprod) - 1
-		self.lmbd_t = (
-			(1.0 - betas) 
-			* (1.0 - self.alphas_cumprod) 
-			/ betas
-		)
 		self.t_mse_weights = get_t_weighting_scheme(
 			self.t_mse_weighting_scheme, 
 			self.num_timesteps, 
-			self.lmbd_t, 
 			self.snr
 		)
 		self.t_xs_count_weights = get_t_weighting_scheme(
 			self.t_xs_count_weighting_scheme, 
 			self.num_timesteps, 
-			self.lmbd_t, 
 			self.snr
 		)
 		self.t_cb_count_weights = get_t_weighting_scheme(
 			self.t_cb_count_weighting_scheme,
 			self.num_timesteps,
-			self.lmbd_t,
 			self.snr
 		)
 
