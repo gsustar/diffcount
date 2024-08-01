@@ -668,13 +668,14 @@ class DenoiseDiffusion(BaseDiffusion):
 					t=t,
 					clip_denoised=False,
 				)
-				terms["vb"] = _vb["output"] * self.lmbd_vb
-				pred_xstart = _vb["pred_xstart"]
 
 				if self.loss_type == LossType.RESCALED_MSE:
 					# Divide by 1000 for equivalence with initial implementation.
 					# Without a factor of 1/1000, the VB term hurts the MSE term.
 					terms["vb"] *= self.num_timesteps / 1000.0
+
+				terms["vb"] = _vb["output"] * self.lmbd_vb
+				pred_xstart = _vb["pred_xstart"]
 
 			target = {
 				ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
