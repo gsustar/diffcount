@@ -255,10 +255,8 @@ def create_denoise_diffusion(
 	rescale_learned_sigmas,
 	timestep_respacing,
 	lmbd_vlb,
-	lmbd_xs_count,
 	lmbd_cb_count,
 	t_mse_weighting_scheme,
-	t_xs_count_weighting_scheme,
 	t_cb_count_weighting_scheme,
 	enforce_zero_terminal_snr,
 ):
@@ -308,10 +306,8 @@ def create_denoise_diffusion(
 		loss_type=loss_type,
 		rescale_timesteps=rescale_timesteps,
 		lmbd_vlb=lmbd_vlb,
-		lmbd_xs_count=lmbd_xs_count,
 		lmbd_cb_count=lmbd_cb_count,
 		t_mse_weighting_scheme=t_mse_weighting_scheme,
-		t_xs_count_weighting_scheme=t_xs_count_weighting_scheme,
 		t_cb_count_weighting_scheme=t_cb_count_weighting_scheme,
 	)
 

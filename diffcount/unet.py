@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from einops import rearrange
 
-from .conditioning import RoIAlignExemplarEmbedder
+from .conditioning import LightRoIAlignExemplarEmbedder
 from .attention import BasicTransformerBlock
 from .dit import DiTBlock
 from .count_utils import CountingBranch
@@ -436,32 +436,40 @@ class UNetModel(nn.Module):
 		if bbox_dim is not None:
 			assert context_dim is None or context_dim == bbox_dim
 			ds_ = 1
-			self.ex_embedders = nn.ModuleList([])
+			# self.ex_embedders = nn.ModuleList([])
 			for level, mult in enumerate(channel_mult):
 				if ds_ in attention_resolutions:
 					ch_ = int(mult * model_channels)
+					
 					if bbox_dim == "adaptive":
 						assert not adalnzero and context_dim is None
 						context_dims[level] = ch_
 
-					self.ex_embedders.append(
-						RoIAlignExemplarEmbedder(
-							in_channels=ch_,
-							roi_output_size=7,
-							out_channels=bbox_dim,
-							spatial_scale=(initial_ds / ds_),
-							remove_sequence_dim=adalnzero,
-						)
-					)
-				else:
-					self.ex_embedders.append(None)
+
+					# self.ex_embedders.append(
+					# 	RoIAlignExemplarEmbedder(
+					# 		in_channels=ch_,
+					# 		roi_output_size=7,
+					# 		out_channels=bbox_dim,
+					# 		spatial_scale=(initial_ds / ds_),
+					# 		remove_sequence_dim=adalnzero,
+					# 	)
+					# )
+					self.ex_embedders[level] = LightRoIAlignExemplarEmbedder(
+												in_channels=ch_,
+												out_channels=bbox_dim,
+												roi_output_size=7,
+												spatial_scale=(initial_ds / ds_),
+												remove_sequence_dim=adalnzero,
+											)
 				ds_ *= 2
+			self.ex_embedders = nn.ModuleList(self.ex_embedders)
 
 			if adalnzero:
 				assert num_bboxes is not None
 				self.bbox_y_embed = nn.Sequential(
 					nn.Linear(bbox_dim * num_bboxes, time_embed_dim),
-					nn.SiLU(),
+					nn.ReLU(),
 					nn.Linear(time_embed_dim, time_embed_dim)
 				)
 

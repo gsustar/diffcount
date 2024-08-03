@@ -13,7 +13,7 @@ diffusion:
   schedule_sampler: "uniform"
   type: "Denoise" # or Deblur
   params:
-    diffusion_steps: 1000
+    diffusion_steps: 250
     noise_schedule: scaled_linear
     learn_sigma: *learn_sigma
     sigma_small: False
@@ -23,19 +23,17 @@ diffusion:
     rescale_learned_sigmas: False
     timestep_respacing: ""
     lmbd_vlb: 0.001
-    lmbd_xs_count: 0.0
-    lmbd_cb_count: 0.0
+    lmbd_cb_count: 0.005
     t_mse_weighting_scheme: "uniform"
-    t_xs_count_weighting_scheme: "exp"
-    t_cb_count_weighting_scheme: "exp"
+    t_cb_count_weighting_scheme: "uniform"
     enforce_zero_terminal_snr: True
 
 model:
   type: "UNet" # or DiT
   params:
-    input_size: 32
+    input_size: 64
     in_channels: 8
-    model_channels: 32
+    model_channels: 64
     out_channels: 4
     num_res_blocks: 2
     attention_resolutions: [32, 16, 8]
@@ -44,7 +42,7 @@ model:
     conv_resample: True
     dims: 2
     y_dim: null
-    context_dim: null
+    context_dim: 512
     use_checkpoint: True
     num_heads: 1
     num_head_channels: -1
@@ -52,12 +50,12 @@ model:
     use_scale_shift_norm: True
     resblock_updown: True
     adalnzero: False
-    learn_count: False
+    learn_count: True
     learn_sigma: *learn_sigma
     transformer_depth: 1
-    initial_ds: 0.125
-    num_bboxes: 3
-    bbox_dim: adaptive
+    initial_ds: 1.0
+    num_bboxes: null
+    bbox_dim: null
 
 conditioner:
   embedders:
@@ -65,18 +63,19 @@ conditioner:
       input_keys: ["img"]
       is_trainable: False
 
-    - type: "BBoxAppendEmbedder"
-      input_keys: ["bboxes"]
-      is_trainable: False
+    # - type: "BBoxAppendEmbedder"
+    #   input_keys: ["bboxes"]
+    #   is_trainable: False
 
-    # - type: "RoIAlignExemplarEmbedder"
-    #   input_keys: ["img", "bboxes"]
-    #   is_trainable: True
-    #   params:
-    #     in_channels: 4
-    #     roi_output_size: 7
-    #     out_channels: 256
-    #     remove_sequence_dim: False
+    - type: "RoIAlignExemplarEmbedder"
+      input_keys: ["img", "bboxes"]
+      is_trainable: True
+      params:
+        in_channels: 4
+        inner_dim: 256
+        out_channels: 512
+        roi_output_size: 7
+        remove_sequence_dim: False
 
     # - type: "ViTExemplarEmbedder"
     #   input_keys: ["img", "bboxes"]
@@ -96,7 +95,7 @@ data:
       datadir: ../FSC147_384_V2/
       targetdir: densitymaps/debugging
       n_exemplars: 3
-      image_size: 256
+      image_size: 512
       hflip_p: 0.5
       cj_p: 0.0
       sigma: 0.5
@@ -127,4 +126,4 @@ log:
   logdir: ../experiments/dummy/
   wandb_mode: disabled
   log_interval: 10
-  save_interval: 100000
+  save_interval: 10

@@ -13,7 +13,7 @@ from .resample import LossAwareSampler, UniformSampler
 from .plot_utils import draw_bboxes, draw_cls, draw_denoising_process, draw_result
 from .ema import ExponentialMovingAverage
 from .nn import possibly_vae_decode, encode, torch_to
-from .count_utils import XSCountPredictor, nms_count
+from .count_utils import counting
 
 
 class TrainLoop:
@@ -67,20 +67,12 @@ class TrainLoop:
 		self.conditioner = conditioner
 		self.vae = vae
 		self.opt = self.configure_optimizer()
-		self.scaler = th.cuda.amp.GradScaler(enabled=self.use_fp16)
+		self.scaler = th.amp.GradScaler("cuda", enabled=self.use_fp16)
 		self.sch = self.configure_scheduler(self.opt)
 		self.ema = ExponentialMovingAverage(
 			self.model.parameters(),
 			decay=ema_rate,
 		)
-		if self.vae is None:
-			self.xs_count_predictor = lambda x: th.sum((x + 1) / 2, dim=(1, 2, 3), keepdim=True)
-		else:
-			input_size = image_size // 8
-			self.xs_count_predictor = XSCountPredictor(
-				input_dim=input_size * input_size * 4,
-				hidden_dim=128
-			).to(self.device)
 
 		if self.resume_checkpoint:
 			self.load()
@@ -161,8 +153,7 @@ class TrainLoop:
 				model_kwargs=dict(
 					cond=self.conditioner(cond),
 					count=count,
-				),
-				xs_count_predictor=self.xs_count_predictor
+				)
 			)
 		if isinstance(self.schedule_sampler, LossAwareSampler):
 			self.schedule_sampler.update_with_all_losses(
@@ -335,7 +326,7 @@ def log_results(final, cond, step=None):
 	for j, f in enumerate(final):
 		img = cond["img"][j].unsqueeze(0)
 		density = f.unsqueeze(0)
-		pred_count, pred_coords = nms_count(f)
+		pred_count, pred_coords = counting(f)
 		res = draw_result(img, density, float(pred_count), target_count[j], pred_coords)
 		results.append(pil_to_tensor(res))
 	results = th.stack(results)

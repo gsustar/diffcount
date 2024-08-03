@@ -174,10 +174,8 @@ class DenoiseDiffusion(BaseDiffusion):
 		loss_type,
 		rescale_timesteps=False,
 		lmbd_vlb=0.001,
-		lmbd_xs_count=0.0,
 		lmbd_cb_count=0.0,
 		t_mse_weighting_scheme="uniform",
-		t_xs_count_weighting_scheme="uniform",
 		t_cb_count_weighting_scheme="uniform",
 	):
 		self.model_mean_type = model_mean_type
@@ -186,10 +184,8 @@ class DenoiseDiffusion(BaseDiffusion):
 		self.rescale_timesteps = rescale_timesteps
 
 		self.lmbd_vb = lmbd_vlb
-		self.lmbd_xs_count = lmbd_xs_count
 		self.lmbd_cb_count = lmbd_cb_count
 		self.t_mse_weighting_scheme = t_mse_weighting_scheme
-		self.t_xs_count_weighting_scheme = t_xs_count_weighting_scheme
 		self.t_cb_count_weighting_scheme = t_cb_count_weighting_scheme
 
 		# Use float64 for accuracy.
@@ -234,11 +230,6 @@ class DenoiseDiffusion(BaseDiffusion):
 		self.snr = 1.0 / (1 - self.alphas_cumprod) - 1
 		self.t_mse_weights = get_t_weighting_scheme(
 			self.t_mse_weighting_scheme, 
-			self.num_timesteps, 
-			self.snr
-		)
-		self.t_xs_count_weights = get_t_weighting_scheme(
-			self.t_xs_count_weighting_scheme, 
 			self.num_timesteps, 
 			self.snr
 		)
@@ -607,7 +598,7 @@ class DenoiseDiffusion(BaseDiffusion):
 		output = th.where((t == 0), decoder_nll, kl)
 		return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-	def training_losses(self, model, x_start, t, model_kwargs=None, noise=None, xs_count_predictor=None):
+	def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
 		"""
 		Compute training losses for a single timestep.
 
@@ -628,7 +619,6 @@ class DenoiseDiffusion(BaseDiffusion):
 
 		terms = {}
 		
-		pred_xstart = None
 		target_count = model_kwargs.pop("count").unsqueeze(1)
 
 		if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
@@ -675,7 +665,6 @@ class DenoiseDiffusion(BaseDiffusion):
 					terms["vb"] *= self.num_timesteps / 1000.0
 
 				terms["vb"] = _vb["output"] * self.lmbd_vb
-				pred_xstart = _vb["pred_xstart"]
 
 			target = {
 				ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
@@ -689,35 +678,14 @@ class DenoiseDiffusion(BaseDiffusion):
 			}[self.model_mean_type]
 			assert model_output.shape == target.shape == x_start.shape
 
-			model_xs_count = None
-			if self.lmbd_xs_count > 0.0:
-				if pred_xstart is None:
-					if self.model_mean_type == ModelMeanType.START_X:
-						pred_xstart = model_output
-					elif self.model_mean_type == ModelMeanType.EPSILON:
-						pred_xstart = self._predict_xstart_from_eps(x_t, t, model_output)
-					elif self.model_mean_type == ModelMeanType.V:
-						pred_xstart = self._predict_start_from_v(x_t, t, model_output)
-					elif self.model_mean_type == ModelMeanType.PREVIOUS_X:
-						pred_xstart = self._predict_xstart_from_xprev(x_t, t, model_output)
-					else:
-						raise NotImplementedError(self.model_mean_type)
-				model_xs_count = xs_count_predictor(pred_xstart)
-
 			lmbd_t_mse = _extract_into_tensor(self.t_mse_weights, t, target.shape)
 			terms["mse"] = mean_flat(lmbd_t_mse * (target - model_output) ** 2)
-
-			if model_xs_count is not None and self.lmbd_xs_count > 0.0:
-				lmbd_t_xs_count = _extract_into_tensor(self.t_xs_count_weights, t, target_count.shape)
-				terms["xs_count"] = self.lmbd_xs_count * mean_flat(lmbd_t_xs_count * abs(target_count - model_xs_count))
 
 			if model_cb_count is not None and self.lmbd_cb_count > 0.0:
 				lmbd_t_cb_count = _extract_into_tensor(self.t_cb_count_weights, t, target_count.shape)
 				terms["cb_count"] = self.lmbd_cb_count * mean_flat(lmbd_t_cb_count * abs(target_count - model_cb_count))
 
 			terms["loss"] = terms["mse"]
-			if "xs_count" in terms:
-				terms["loss"] = terms["loss"] + terms["xs_count"]
 
 			if "cb_count" in terms:
 				terms["loss"] = terms["loss"] + terms["cb_count"]

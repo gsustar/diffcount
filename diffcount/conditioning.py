@@ -110,6 +110,7 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		input_size,
 		in_channels,
 		out_channels,
+		roi_output_size=7,
 		vit_size="B",
 		freeze_backbone=True,
 		remove_sequence_dim=False,
@@ -183,12 +184,12 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 			square_pad=0,
 		)
 		self.roi_pooler = ROIPooler(
-			output_size=7,
+			output_size=roi_output_size,
 			scales=(1.0 / 4, 1.0 / 8, 1.0 / 16, 1.0 / 32),
 			sampling_ratio=0,
 			pooler_type="ROIAlignV2",
 		)
-		self.fc1 = nn.Linear(256 * 7**2, out_channels) # vit_out_channels * roi_output_size^2
+		self.fc1 = nn.Linear(256 * roi_output_size**2, out_channels) # vit_out_channels * roi_output_size^2
 
 		checkpointer = DetectionCheckpointer(self)
 		# checkpointer.load(ViTExemplarEmbedder.VITDET_PRETRAINED_MODELS[vit_size])
@@ -219,30 +220,104 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 
 
 class RoIAlignExemplarEmbedder(AbstractEmbModel):
+
+	def __init__(
+		self,
+		in_channels,
+		inner_dim,
+		out_channels,
+		roi_output_size,
+		n_convs=2,
+		spatial_scale=0.125,
+		remove_sequence_dim=False,
+		mlp_ratio=4,
+	):
+		super().__init__()
+
+		self.in_channels = in_channels
+		self.out_channels = out_channels
+		self.roi_output_size = roi_output_size
+		self.spatial_scale = spatial_scale
+		self.remove_sequence_dim = remove_sequence_dim
+
+		self.norm_in = nn.LayerNorm([in_channels, roi_output_size, roi_output_size])
+		self.in_layers = nn.ModuleList([])
+		ch = in_channels
+		for _ in range(n_convs):
+			self.in_layers.append(
+				nn.Sequential(
+					nn.Conv2d(
+						ch,
+						inner_dim,
+						kernel_size=1,
+						stride=1,
+						padding=0
+					),
+					nn.GroupNorm(32, inner_dim),
+					nn.ReLU()
+				)
+			)
+			ch = inner_dim
+
+		self.avgpool = nn.AdaptiveAvgPool2d(1)
+		hidden_channels = mlp_ratio * inner_dim
+		self.out = nn.Sequential(
+			nn.Linear(inner_dim, hidden_channels),
+			nn.LayerNorm(hidden_channels),
+			nn.ReLU(),
+			nn.Linear(hidden_channels, out_channels)
+		)
+
+
+	def forward(self, z, bboxes, ds=1.0):
+		bs, ch, _, _ = z.shape
+		assert ch > 3, "z must be a feature map not an image"
+		x = roi_align(
+			z, 
+			boxes=list(bboxes), 
+			output_size=self.roi_output_size, 
+			spatial_scale=(self.spatial_scale / ds),
+			aligned=True
+		)
+		x = self.norm_in(x)
+		for module in self.in_layers:
+			x = module(x)
+		x = self.avgpool(x)
+		x = x.reshape(bs, -1, x.shape[1])
+		x = self.out(x)
+
+		if self.remove_sequence_dim:
+			x = x.reshape(bs, -1)
+		return x
+
+
+class LightRoIAlignExemplarEmbedder(AbstractEmbModel):
 	
 	def __init__(
 		self,
 		in_channels,
-		roi_output_size,
 		out_channels,
+		roi_output_size,
 		spatial_scale=0.125,
 		remove_sequence_dim=False,
 	):
 		super().__init__()
 
-		self.skip_fc = False
-		if out_channels == "adaptive":
-			out_channels = in_channels
-			self.skip_fc = True
-
+		self.skip_out = True if out_channels == "adaptive" else False
 		self.in_channels = in_channels
-		self.roi_output_size = roi_output_size
 		self.out_channels = out_channels
+		self.roi_output_size = roi_output_size
 		self.spatial_scale = spatial_scale
 		self.remove_sequence_dim = remove_sequence_dim
 
 		self.avgpool = nn.AdaptiveAvgPool2d(1)
-		self.fc1 = nn.Linear(in_channels, out_channels)
+		if not self.skip_out:
+			self.out = nn.Sequential(
+				nn.Linear(in_channels, out_channels),
+				nn.LayerNorm(out_channels),
+				nn.ReLU(),
+				nn.Linear(out_channels, out_channels)
+			)
 
 	def forward(self, z, bboxes, ds=1.0):
 		bs, ch, _, _ = z.shape
@@ -256,10 +331,46 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 		)
 		x = self.avgpool(x)
 		x = x.reshape(bs, -1, x.shape[1])
-
-		if not self.skip_fc:
-			x = self.fc1(x)
+		if not self.skip_out:
+			x = self.out(x)
 
 		if self.remove_sequence_dim:
 			x = x.reshape(bs, -1)
 		return x
+	
+
+class OPEExemplarEmbedder(AbstractEmbModel):
+
+	def __init__():
+		super().__init__()
+
+
+	def forward(img, bboxes):
+		pass
+
+
+
+class BBoxShapeEmbedder(AbstractEmbModel):
+
+	def __init__():
+		super().__init__()
+
+
+	def forward(bboxes):
+		pass
+
+
+
+class SAM2ExemplarMaskEmbedder(AbstractEmbModel):
+
+	def __init__(self):
+		super().__init__()
+		try:
+			from sam2.build_sam import build_sam2
+			from sam2.sam2_image_predictor import SAM2ImagePredictor
+		except ImportError:
+			raise ImportError("sam2 is required for SAM2ImageMaskEmbedder")
+		
+		
+	def forward(self):
+		pass

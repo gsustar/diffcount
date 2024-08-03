@@ -1,11 +1,12 @@
 import argparse
 import torch as th
 import os.path as osp
+import warnings
 
 from diffcount import logger
 from diffcount.ema import ExponentialMovingAverage
 from diffcount.plot_utils import draw_result
-from diffcount.count_utils import nms_count
+from diffcount.count_utils import counting
 from diffcount.nn import (
 	torch_to, 
 	possibly_vae_decode, 
@@ -20,6 +21,7 @@ from diffcount.script_util import (
 	parse_config,
 )
 
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 def main():
 	args = parse_args()
@@ -74,12 +76,13 @@ def main():
 	)
 	ema.load_state_dict(ckpt["ema"])
 
-	RMSE = {"val": 0.0, "test": 0.0}
-	MAE = {"val": 0.0, "test": 0.0}
-	for split in ["val", "test"]:
-		logger.log(f"evaluating on {split} set...")
+	splits = [args.split] if args.split is not None else ["val", "test"]
+	for split in splits:
+		logger.log(f"Evaluating on {split.upper()} set...")
 		eval_data = val_data if split == "val" else test_data
 		N = len(eval_data)
+		MAE = 0.0
+		RMSE = 0.0
 		for i, (batch, cond) in enumerate(eval_data):
 			batch = torch_to(batch, dev)
 			cond = torch_to(cond, dev)
@@ -98,26 +101,29 @@ def main():
 						clip_denoised=False,
 					)
 		
-			target_count = cond["count"].float()
+			target_count = cond["count"].float().cpu()
 			samples = possibly_vae_decode(samples, vae, clip_decoded=True)
+			pred_count = th.zeros_like(target_count)
+			for j, s in enumerate(samples):
+				count, coords = counting(s)
+				pred_count[j] = count
 
-			if not args.skip_plotting:
-				for j, s in enumerate(samples):
+				if not args.skip_plotting:
 					img = cond["img"][j].unsqueeze(0)
 					density = s.unsqueeze(0)
-					pred_count, pred_coords = nms_count(s)
-					res = draw_result(img, density, float(pred_count), target_count[j], pred_coords)
+					res = draw_result(img, density, float(count), target_count[j], coords)
 					logger.logimg(res, name=f"{i*args.batch_size + j}", step=f"{split}")
 
 			logger.log(f"{i+1}/{N}")
-			RMSE[split] += th.sqrt(th.mean((target_count - pred_count) ** 2)).item()
-			MAE[split] += th.mean(th.abs(target_count - pred_count)).item()
+			MAE += th.sum(th.abs(target_count - pred_count))
+			RMSE += th.sum((target_count - pred_count) ** 2)
 
-		RMSE[split] /= N
-		MAE[split] /= N
+		RMSE = th.sqrt(RMSE / N)
+		MAE = MAE / N
 
-		logger.log(f"{split} RMSE: {RMSE[split]:.4f}")
-		logger.log(f"{split} MAE: {MAE[split]:.4f}")
+		logger.log(f"{split.upper()}")
+		logger.log(f"RMSE: {RMSE.item():.4f}")
+		logger.log(f"MAE: {MAE.item():.4f}")
 
 
 def parse_args():
@@ -128,6 +134,7 @@ def parse_args():
 	parser.add_argument("--ddim_steps", type=int, default=None)
 	parser.add_argument("--use_fp16", action="store_true")
 	parser.add_argument("--skip_plotting", action="store_true")
+	parser.add_argument("--split", type=str, default=None)
 	return parser.parse_args()
 
 

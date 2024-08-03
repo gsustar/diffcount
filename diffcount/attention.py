@@ -2,48 +2,46 @@ import math
 import torch
 import torch.nn.functional as F
 
-from torch import nn, einsum
-from packaging import version
+from torch import nn
 from inspect import isfunction
-from einops import rearrange, repeat
+from einops import rearrange
 from torch.utils.checkpoint import checkpoint
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from . import logger
 
+def get_sdpa_settings():
+	if torch.cuda.is_available():
+		old_gpu = torch.cuda.get_device_properties(0).major < 7
+		# only use Flash Attention on Ampere (8.0) or newer GPUs
+		use_flash_attn = torch.cuda.get_device_properties(0).major >= 8
+		if not use_flash_attn:
+			logger.warn(
+				"Flash Attention is disabled as it requires a GPU with Ampere (8.0) CUDA capability.",
+			)
+		# keep math kernel for PyTorch versions before 2.2 (Flash Attention v2 is only
+		# available on PyTorch 2.2+, while Flash Attention v1 cannot handle all cases)
+		pytorch_version = tuple(int(v) for v in torch.__version__.split(".")[:2])
+		if pytorch_version < (2, 2):
+			logger.warn(
+				f"You are using PyTorch {torch.__version__} without Flash Attention v2 support. "
+				"Consider upgrading to PyTorch 2.2+ for Flash Attention v2 (which could be faster).",
+			)
+		math_kernel_on = pytorch_version < (2, 2) or not use_flash_attn
+	else:
+		old_gpu = True
+		use_flash_attn = False
+		math_kernel_on = True
 
-if version.parse(torch.__version__) >= version.parse("2.0.0"):
-    SDP_IS_AVAILABLE = True
-    from torch.backends.cuda import SDPBackend, sdp_kernel
+	backend = []
+	if old_gpu:
+		backend.append(SDPBackend.EFFICIENT_ATTENTION)
+	if use_flash_attn:
+		backend.append(SDPBackend.FLASH_ATTENTION)
+	if math_kernel_on:
+		backend.append(SDPBackend.MATH)
 
-    BACKEND_MAP = {
-        SDPBackend.MATH: {
-            "enable_math": True,
-            "enable_flash": False,
-            "enable_mem_efficient": False,
-        },
-        SDPBackend.FLASH_ATTENTION: {
-            "enable_math": False,
-            "enable_flash": True,
-            "enable_mem_efficient": False,
-        },
-        SDPBackend.EFFICIENT_ATTENTION: {
-            "enable_math": False,
-            "enable_flash": False,
-            "enable_mem_efficient": True,
-        },
-        None: {"enable_math": True, "enable_flash": True, "enable_mem_efficient": True},
-    }
-else:
-    from contextlib import nullcontext
-
-    SDP_IS_AVAILABLE = False
-    sdp_kernel = nullcontext
-    BACKEND_MAP = {}
-    logger.warn(
-        f"No SDP backend available, likely because you are running in pytorch "
-        f"versions < 2.0. In fact, you are using PyTorch {torch.__version__}. "
-        f"You might want to consider upgrading."
-    )
+	return backend
 
 
 def exists(val):
@@ -111,80 +109,57 @@ def zero_module(module):
 	return module
 
 
-
 class CrossAttention(nn.Module):
-    def __init__(
-        self,
-        query_dim,
-        context_dim=None,
-        heads=8,
-        dim_head=64,
-        dropout=0.0,
-        backend=None,
-    ):
-        super().__init__()
-        inner_dim = dim_head * heads
-        context_dim = default(context_dim, query_dim)
+	BACKEND = get_sdpa_settings()
 
-        self.scale = dim_head**-0.5
-        self.heads = heads
+	def __init__(
+		self,
+		query_dim,
+		context_dim=None,
+		heads=8,
+		dim_head=64,
+		dropout=0.0,
+	):
+		super().__init__()
+		inner_dim = dim_head * heads
+		context_dim = default(context_dim, query_dim)
 
-        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
-        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+		self.scale = dim_head**-0.5
+		self.heads = heads
 
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, query_dim), nn.Dropout(dropout)
-        )
-        self.backend = backend
+		self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+		self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+		self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
 
-    def forward(
-        self,
-        x,
-        context=None,
-        mask=None,
-        additional_tokens=None,
-        n_times_crossframe_attn_in_self=0,
-    ):
-        h = self.heads
+		self.dropout = dropout
+		self.to_out = nn.Sequential(
+			nn.Linear(inner_dim, query_dim), nn.Dropout(dropout)
+		)
 
-        if additional_tokens is not None:
-            # get the number of masked tokens at the beginning of the output sequence
-            n_tokens_to_mask = additional_tokens.shape[1]
-            # add additional token
-            x = torch.cat([additional_tokens, x], dim=1)
+	def forward(
+		self,
+		x,
+		context=None,
+		mask=None,
+	):
+		h = self.heads
+		q = self.to_q(x)
+		context = default(context, x)
+		k = self.to_k(context)
+		v = self.to_v(context)
 
-        q = self.to_q(x)
-        context = default(context, x)
-        k = self.to_k(context)
-        v = self.to_v(context)
+		q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=h), (q, k, v))
 
-        if n_times_crossframe_attn_in_self:
-            # reprogramming cross-frame attention as in https://arxiv.org/abs/2303.13439
-            assert x.shape[0] % n_times_crossframe_attn_in_self == 0
-            n_cp = x.shape[0] // n_times_crossframe_attn_in_self
-            k = repeat(
-                k[::n_times_crossframe_attn_in_self], "b ... -> (b n) ...", n=n_cp
-            )
-            v = repeat(
-                v[::n_times_crossframe_attn_in_self], "b ... -> (b n) ...", n=n_cp
-            )
+		with torch.nn.attention.sdpa_kernel(self.BACKEND):
+			# print("dispatching into backend", self.backend, "q/k/v shape: ", q.shape, k.shape, v.shape)
+			out = F.scaled_dot_product_attention(
+				q, k, v, attn_mask=mask
+			)  # scale is dim_head ** -0.5 per default
 
-        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=h), (q, k, v))
+		del q, k, v
+		out = rearrange(out, "b h n d -> b n (h d)", h=h)
 
-        with sdp_kernel(**BACKEND_MAP[self.backend]):
-            # print("dispatching into backend", self.backend, "q/k/v shape: ", q.shape, k.shape, v.shape)
-            out = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=mask
-            )  # scale is dim_head ** -0.5 per default
-
-        del q, k, v
-        out = rearrange(out, "b h n d -> b n (h d)", h=h)
-
-        if additional_tokens is not None:
-            # remove additional token
-            out = out[:, n_tokens_to_mask:]
-        return self.to_out(out)
+		return self.to_out(out)
 
 
 # class CrossAttention(nn.Module):
