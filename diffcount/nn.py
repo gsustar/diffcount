@@ -171,13 +171,15 @@ def possibly_vae_decode(z, vae=None, clip_decoded=False):
 	return z
 
 
-@th.no_grad
-def encode(batch, cond, vae, encode_keys=["img"]):
-	batch = possibly_vae_encode(batch, vae)
-	for k in encode_keys:
-		if k in cond:
-			cond[k] = possibly_vae_encode(cond[k], vae)
-	return batch, cond
+# @th.no_grad
+# def encode(batch, cond, vae):
+# 	ENCODE_KEYS = ["img"]
+# 	batch = possibly_vae_encode(batch, vae)
+# 	for k in ENCODE_KEYS:
+# 		if k in cond:
+# 			new_k = f"z_{k}"
+# 			cond[new_k] = possibly_vae_encode(cond[k], vae)
+# 	return batch, cond
 
 
 def torch_to(x, *args, **kwargs):

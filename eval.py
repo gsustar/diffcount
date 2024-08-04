@@ -98,7 +98,7 @@ def main():
 						model_kwargs=dict(
 							cond=conditioner(en_cond)
 						),
-						clip_denoised=False,
+						clip_denoised=True,
 					)
 		
 			target_count = cond["count"].float().cpu()

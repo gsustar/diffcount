@@ -12,7 +12,7 @@ from . import logger
 from .resample import LossAwareSampler, UniformSampler
 from .plot_utils import draw_bboxes, draw_cls, draw_denoising_process, draw_result
 from .ema import ExponentialMovingAverage
-from .nn import possibly_vae_decode, encode, torch_to
+from .nn import possibly_vae_decode, torch_to, possibly_vae_encode
 from .count_utils import counting
 
 
@@ -20,7 +20,7 @@ class TrainLoop:
 	def __init__(
 		self,
 		*,
-		image_size,
+		input_size,
 		model,
 		diffusion,
 		data,
@@ -42,6 +42,7 @@ class TrainLoop:
 		grad_clip=0.0,
 		lr_scheduler=None,
 	):
+		self.input_size = input_size
 		self.model = model
 		self.diffusion = diffusion
 		self.data = data
@@ -73,6 +74,8 @@ class TrainLoop:
 			self.model.parameters(),
 			decay=ema_rate,
 		)
+
+		self.input_ch = self.vae.config.latent_channels if self.vae else 1
 
 		if self.resume_checkpoint:
 			self.load()
@@ -141,8 +144,8 @@ class TrainLoop:
 	def run_step(self, batch, cond):
 		self.opt.zero_grad()
 		batch = torch_to(batch, self.device)
+		batch = possibly_vae_encode(batch, self.vae)
 		cond = torch_to(cond, self.device)
-		batch, cond = encode(batch, cond, self.vae)
 		count = cond.pop("count")
 		t, weights = self.schedule_sampler.sample(batch.shape[0], self.device)
 		with th.autocast(device_type=self.device, dtype=th.float16, enabled=self.use_fp16):
@@ -151,7 +154,7 @@ class TrainLoop:
 				batch,
 				t,
 				model_kwargs=dict(
-					cond=self.conditioner(cond),
+					cond=self.conditioner(cond, self.vae),
 					count=count,
 				)
 			)
@@ -194,19 +197,18 @@ class TrainLoop:
 		batch, cond = next(iter(self.val_data))
 		batch = torch_to(batch, self.device)
 		cond = torch_to(cond, self.device)
-		en_batch, en_cond = encode(batch.clone(), cond.copy(), self.vae)
 		with th.autocast(device_type=self.device, dtype=th.float16, enabled=self.use_fp16):
 			with self.ema.average_parameters(self.model.parameters()):
 				samples = self.diffusion.p_sample_loop_progressive(
 					self.model,
-					en_batch.shape,
+					(self.batch_size, self.input_ch, self.input_size, self.input_size),
 					model_kwargs=dict(
-						cond=self.conditioner(en_cond)
+						cond=self.conditioner(cond, self.vae)
 					),
 					clip_denoised=False,
 				)
 				final = log_denoising_process(
-					samples, cond, self.diffusion, vae=self.vae, t_step=125, step=self.step
+					samples, self.diffusion, vae=self.vae, t_step=125, step=self.step
 				)
 				log_results(
 					final, cond, step=self.step
@@ -302,7 +304,7 @@ def log_batch_with_cond(batch, cond, prefix="train", step=None):
 		logger.logimg(img, f"{prefix}_cond", step=step)
 
 
-def log_denoising_process(samples, cond, diffusion, vae, t_step=125, step=None):
+def log_denoising_process(samples, diffusion, vae, t_step=125, step=None):
 	assert diffusion.num_timesteps % t_step == 0
 	outs = []
 	xstarts = []

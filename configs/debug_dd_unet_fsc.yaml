@@ -32,7 +32,7 @@ model:
   type: "UNet" # or DiT
   params:
     input_size: 64
-    in_channels: 8
+    in_channels: 12
     model_channels: 64
     out_channels: 4
     num_res_blocks: 2
@@ -42,7 +42,7 @@ model:
     conv_resample: True
     dims: 2
     y_dim: null
-    context_dim: 512
+    context_dim: null
     use_checkpoint: True
     num_heads: 1
     num_head_channels: -1
@@ -53,9 +53,9 @@ model:
     learn_count: True
     learn_sigma: *learn_sigma
     transformer_depth: 1
-    initial_ds: 1.0
-    num_bboxes: null
-    bbox_dim: null
+    initial_ds: 0.125
+    num_bboxes: 3
+    bbox_dim: adaptive
 
 conditioner:
   embedders:
@@ -63,22 +63,28 @@ conditioner:
       input_keys: ["img"]
       is_trainable: False
 
-    # - type: "BBoxAppendEmbedder"
-    #   input_keys: ["bboxes"]
-    #   is_trainable: False
-
-    - type: "RoIAlignExemplarEmbedder"
+    - type: "BBoxAppendEmbedder"
+      input_keys: ["bboxes"]
+      is_trainable: False
+    
+    - type: "SAM2ExemplarMaskEmbedder"
       input_keys: ["img", "bboxes"]
-      is_trainable: True
+      is_trainable: False
       params:
-        in_channels: 4
-        inner_dim: 256
-        out_channels: 512
-        roi_output_size: 7
-        remove_sequence_dim: False
+        checkpoint: ../sam2_hiera_large.pt
+
+    # - type: "RoIAlignExemplarEmbedder"
+    #   input_keys: ["z_img", "bboxes"]
+    #   is_trainable: True
+    #   params:
+    #     in_channels: 4
+    #     inner_dim: 256
+    #     out_channels: 512
+    #     roi_output_size: 7
+    #     remove_sequence_dim: False
 
     # - type: "ViTExemplarEmbedder"
-    #   input_keys: ["img", "bboxes"]
+    #   input_keys: ["z_img", "bboxes"]
     #   is_trainable: True
     #   params:
     #     input_size: 16
@@ -100,7 +106,7 @@ data:
       cj_p: 0.0
       sigma: 0.5
       center_pad: True
-      bbox_max_size: null
+      bbox_max_size: 50
       bbox_min_size: null
       allow_resize_target: False
       target_minmax_norm: True
@@ -126,4 +132,4 @@ log:
   logdir: ../experiments/dummy/
   wandb_mode: disabled
   log_interval: 10
-  save_interval: 10
+  save_interval: 100000

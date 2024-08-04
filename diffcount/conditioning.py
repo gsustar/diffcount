@@ -1,14 +1,17 @@
 
 # TODO classifier-free guidance -> figure out how to null image embedding looks like
+import numpy as np
 import torch as th
 import torch.nn as nn
+import os.path as osp
 
 from contextlib import nullcontext
 from functools import partial
 from itertools import chain
 from torchvision.ops import roi_align
+from einops import rearrange
 
-from .nn import disabled_train, count_params
+from .nn import disabled_train, count_params, timestep_embedding, possibly_vae_encode
 
 
 class AbstractEmbModel(nn.Module):
@@ -42,7 +45,8 @@ class Conditioner(nn.Module):
 			embedders.append(embedder)
 		self.embedders = nn.ModuleList(embedders)
 
-	def forward(self, cond):
+
+	def forward(self, cond, vae=None):
 		output = dict()
 		for embedder in self.embedders:
 			embedding_context = nullcontext if embedder.is_trainable else th.no_grad
@@ -58,6 +62,10 @@ class Conditioner(nn.Module):
 					out_key = "bboxes"
 				else:
 					out_key = self.OUTPUT_DIM2KEYS[emb.dim()]
+
+				if out_key == "concat":
+					emb = possibly_vae_encode(emb, vae)
+
 				if out_key in output:
 					output[out_key] = th.cat(
 						(output[out_key], emb), self.KEY2CATDIM[out_key]
@@ -191,6 +199,9 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		)
 		self.fc1 = nn.Linear(256 * roi_output_size**2, out_channels) # vit_out_channels * roi_output_size^2
 
+		assert in_channels % 2 == 0
+		self.bbox_size_embed = ConcatTimestepEmbedderND(in_channels // 2)
+
 		checkpointer = DetectionCheckpointer(self)
 		# checkpointer.load(ViTExemplarEmbedder.VITDET_PRETRAINED_MODELS[vit_size])
 		checkpointer.load(self.VITDET_PRETRAINED_MODELS[vit_size])
@@ -202,7 +213,6 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 			self.backbone.eval()
 
 	def forward(self, img, bboxes):
-		# TODO when n_exemplars is 0 this will fail - fix
 		batch_size, n_exemplars = bboxes.shape[0], bboxes.shape[1]
 		bbs = [self._Boxes(bb).to(img.device) for bb in bboxes]
 		fpn = self.backbone(img)
@@ -212,6 +222,12 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		x = x.flatten(start_dim=1)
 		x = x.reshape(batch_size, n_exemplars, x.shape[1])
 		x = self.fc1(x)
+
+		bbox_size = th.stack((
+			bboxes[:, :, 3] - bboxes[:, :, 1],
+			bboxes[:, :, 2] - bboxes[:, :, 0]), dim=2
+		)
+		x = x + self.bbox_size_embed(bbox_size)
 
 		if self.remove_sequence_dim:
 			x = x.reshape(batch_size, -1)
@@ -240,6 +256,8 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 		self.spatial_scale = spatial_scale
 		self.remove_sequence_dim = remove_sequence_dim
 
+		assert in_channels % 2 == 0
+		self.bbox_size_embed = ConcatTimestepEmbedderND(in_channels // 2)
 		self.norm_in = nn.LayerNorm([in_channels, roi_output_size, roi_output_size])
 		self.in_layers = nn.ModuleList([])
 		ch = in_channels
@@ -286,6 +304,12 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 		x = x.reshape(bs, -1, x.shape[1])
 		x = self.out(x)
 
+		bbox_size = th.stack((
+			bboxes[:, :, 3] - bboxes[:, :, 1],
+			bboxes[:, :, 2] - bboxes[:, :, 0]), dim=2
+		)
+		x = x + self.bbox_size_embed(bbox_size)
+
 		if self.remove_sequence_dim:
 			x = x.reshape(bs, -1)
 		return x
@@ -310,6 +334,8 @@ class LightRoIAlignExemplarEmbedder(AbstractEmbModel):
 		self.spatial_scale = spatial_scale
 		self.remove_sequence_dim = remove_sequence_dim
 
+		assert in_channels % 2 == 0
+		self.bbox_size_embed = ConcatTimestepEmbedderND(in_channels // 2)
 		self.avgpool = nn.AdaptiveAvgPool2d(1)
 		if not self.skip_out:
 			self.out = nn.Sequential(
@@ -331,13 +357,102 @@ class LightRoIAlignExemplarEmbedder(AbstractEmbModel):
 		)
 		x = self.avgpool(x)
 		x = x.reshape(bs, -1, x.shape[1])
+
 		if not self.skip_out:
 			x = self.out(x)
+
+		bbox_size = th.stack((
+			bboxes[:, :, 3] - bboxes[:, :, 1],
+			bboxes[:, :, 2] - bboxes[:, :, 0]), dim=2
+		)
+		x = x + self.bbox_size_embed(bbox_size)
 
 		if self.remove_sequence_dim:
 			x = x.reshape(bs, -1)
 		return x
 	
+
+
+class ConcatTimestepEmbedderND(AbstractEmbModel):
+	"""embeds each dimension independently and concatenates them"""
+
+	def __init__(self, outdim):
+		super().__init__()
+		self.outdim = outdim
+
+	def forward(self, x):
+		while len(x.shape) < 3:
+			x = x[..., None]
+		assert len(x.shape) == 3
+		b, n, dims = x.shape
+		x = rearrange(x, "b n d -> (b n d)")
+		emb = timestep_embedding(x, dim=self.outdim)
+		emb = rearrange(emb, "(b n d) d2 -> b n (d d2)", b=b, n=n, d=dims, d2=self.outdim)
+		return emb
+
+
+
+class SAM2ExemplarMaskEmbedder(AbstractEmbModel):
+
+	def __init__(self, checkpoint, score_threshold=0.7, multiply_by_score=False):
+		super().__init__()
+		try:
+			from sam2.build_sam import build_sam2 #type: ignore
+			from sam2.sam2_image_predictor import SAM2ImagePredictor #type: ignore
+		except ImportError:
+			raise ImportError("sam2 is required for SAM2ImageMaskEmbedder")
+		
+
+		self.ckpt_full_path = checkpoint
+		self.score_threshold = score_threshold
+		self.multiply_by_score = multiply_by_score
+
+		ckpt, _ = osp.splitext(osp.basename(osp.normpath(checkpoint)))
+		if ckpt == "sam2_hiera_large":
+			self.model_cfg = "sam2_hiera_l.yaml"
+		elif ckpt == "sam2_hiera_base_plus":
+			self.model_cfg = "sam2_hiera_b+.yaml"
+		elif ckpt == "sam2_hiera_small":
+			self.model_cfg = "sam2_hiera_s.yaml"
+		elif ckpt == "sam2_hiera_tiny":
+			self.model_cfg = "sam2_hiera_t.yaml"
+		else:
+			raise ValueError(f"Invalid checkpoint {checkpoint}")
+		
+		self.model = build_sam2(
+			self.model_cfg, 
+			self.ckpt_full_path, 
+			device="cuda" if th.cuda.is_available() else "cpu"
+		)
+		self.predictor = SAM2ImagePredictor(self.model)
+		
+		
+	def forward(self, img, bboxes):
+		dev = img[0].device
+		img = img.permute(0, 2, 3, 1).cpu().numpy()
+		img = (img + 1.0) / 2.0
+		img = [im for im in img]
+		
+		with th.autocast(device_type="cuda", dtype=th.bfloat16):
+			self.predictor.set_image_batch(img)
+			masks_batch, scores_batch, _ = self.predictor.predict_batch(
+				None,
+				None, 
+				box_batch=bboxes, 
+				multimask_output=False
+			)
+		masks_batch = np.stack(masks_batch).squeeze()
+		scores_batch = np.stack(scores_batch)[:, :, None]
+
+		masks_batch = th.as_tensor(masks_batch, device=dev)
+		scores_batch = th.as_tensor(scores_batch, device=dev)
+
+		if self.multiply_by_score:
+			masks_batch *= scores_batch
+
+		return masks_batch
+		
+
 
 class OPEExemplarEmbedder(AbstractEmbModel):
 
@@ -346,31 +461,4 @@ class OPEExemplarEmbedder(AbstractEmbModel):
 
 
 	def forward(img, bboxes):
-		pass
-
-
-
-class BBoxShapeEmbedder(AbstractEmbModel):
-
-	def __init__():
-		super().__init__()
-
-
-	def forward(bboxes):
-		pass
-
-
-
-class SAM2ExemplarMaskEmbedder(AbstractEmbModel):
-
-	def __init__(self):
-		super().__init__()
-		try:
-			from sam2.build_sam import build_sam2
-			from sam2.sam2_image_predictor import SAM2ImagePredictor
-		except ImportError:
-			raise ImportError("sam2 is required for SAM2ImageMaskEmbedder")
-		
-		
-	def forward(self):
-		pass
+		pass	

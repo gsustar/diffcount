@@ -85,7 +85,7 @@ def main():
 
 	logger.log("training...")
 	TrainLoop(
-		image_size=config.data.dataset.params.image_size,
+		input_size=config.model.params.input_size,
 		model=model,
 		diffusion=diffusion,
 		data=train_data,
