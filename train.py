@@ -14,6 +14,7 @@ from diffcount.script_util import (
 	create_data,
 	create_conditioner,
 	create_vae,
+	create_cachedir,
 	namespace_to_dict,
 	parse_config,
 	assert_config,
@@ -71,12 +72,14 @@ def main():
 	)
 
 	logger.log("creating data...")
-	train_data, val_data, _ = create_data(config.data, train=True)
+	cachedir = create_cachedir(config.data.dataset.params.datadir, now)
+	train_data, val_data, _ = create_data(config.data, train=True, cachedir=cachedir)
 
 	logger.log("creating conditioner...")
 	conditioner = create_conditioner(
 		getattr(config, "conditioner", []),
-		train=True
+		cachedir=cachedir,
+		train=True,
 	)
 	conditioner.to(dev)
 
@@ -106,6 +109,7 @@ def main():
 		device=dev,
 		grad_clip=config.train.grad_clip,
 		lr_scheduler=config.train.lr_scheduler,
+		cachedir=cachedir,
 	).run_loop()
 
 

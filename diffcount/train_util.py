@@ -4,6 +4,7 @@ import numpy as np
 import pprint
 import signal
 import sys
+import shutil
 
 from torch.optim import AdamW
 from torchvision.transforms.functional import pil_to_tensor
@@ -41,6 +42,7 @@ class TrainLoop:
 		num_epochs=0,
 		grad_clip=0.0,
 		lr_scheduler=None,
+		cachedir=None
 	):
 		self.input_size = input_size
 		self.model = model
@@ -61,6 +63,7 @@ class TrainLoop:
 		self.num_epochs = num_epochs
 		self.grad_clip = grad_clip
 		self.lr_scheduler = lr_scheduler
+		self.cachedir = cachedir
 
 		self.step = 0
 		self.epoch = 0
@@ -128,6 +131,7 @@ class TrainLoop:
 		# Save the last checkpoint if it wasn't already saved.
 		if (self.epoch - 1) % self.save_interval != 0:
 			self.save()
+		self.cleanup()
 
 	def run_epoch(self):
 		self.model.train()
@@ -144,8 +148,8 @@ class TrainLoop:
 	def run_step(self, batch, cond):
 		self.opt.zero_grad()
 		batch = torch_to(batch, self.device)
-		batch = possibly_vae_encode(batch, self.vae)
 		cond = torch_to(cond, self.device)
+		batch = possibly_vae_encode(batch, self.vae)
 		count = cond.pop("count")
 		t, weights = self.schedule_sampler.sample(batch.shape[0], self.device)
 		with th.autocast(device_type=self.device, dtype=th.float16, enabled=self.use_fp16):
@@ -221,7 +225,7 @@ class TrainLoop:
 	def save(self):
 		logger.log(f"saving model...")
 		filename = f"model{(self.epoch):06d}.pt"
-		with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
+		with bf.BlobFile(bf.join(logger.get_dir(), filename), "wb") as f:
 			checkpoint = {
 				"epoch": self.epoch,
 				"step": self.step,
@@ -270,17 +274,13 @@ class TrainLoop:
 					grad_norm += th.norm(p.grad, p=2, dtype=th.float32).item() ** 2
 		return np.sqrt(grad_norm), np.sqrt(param_norm)
 	
-	def cleanup(self, signum, frame):
-		self.save()
-		logger.log("closing...")
+	def cleanup(self, signum=None, frame=None):
+		logger.log("cleanup initiated")
+		logger.log("removing cache dir...")
+		shutil.rmtree(self.cachedir)
+		logger.log("succesfully removed cachedir")
 		logger.close()
 		sys.exit(0)
-
-
-def get_blob_logdir():
-	# You can change this to be a separate path to save checkpoints to
-	# a blobstore or some external drive.
-	return logger.get_dir()
 
 
 def log_loss_dict(diffusion, ts, losses):

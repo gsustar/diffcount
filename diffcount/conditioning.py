@@ -1,33 +1,53 @@
 
 # TODO classifier-free guidance -> figure out how to null image embedding looks like
+import os
 import numpy as np
 import torch as th
 import torch.nn as nn
 import os.path as osp
+import warnings
 
 from contextlib import nullcontext
 from functools import partial
 from itertools import chain
 from torchvision.ops import roi_align
 from einops import rearrange
+from transformers import SamModel, SamProcessor
 
 from .nn import disabled_train, count_params, timestep_embedding, possibly_vae_encode
 
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 
 class AbstractEmbModel(nn.Module):
-	def __init__(self):
+	def __init__(
+		self, 
+		input_keys=None, 
+		ucg_rate=None, 
+		is_trainable=False,
+		is_cachable=False
+	):
 		super().__init__()
-		self.input_keys = None
-		self.ucg_rate = None
-		self.is_trainable = None
+		self.input_keys = input_keys
+		self.ucg_rate = ucg_rate
+		self.is_trainable = is_trainable
+		self.is_cachable = is_cachable
+
+		assert not (is_cachable and is_trainable)
 
 
 class Conditioner(nn.Module):
 	OUTPUT_DIM2KEYS = {2: "vector", 3: "crossattn", 4: "concat", 5: "concat"}
 	KEY2CATDIM = {"vector": 1, "crossattn": 2, "concat": 1, "bboxes": 1}
 
-	def __init__(self, emb_models):
+	def __init__(self, emb_models, cachedir=None):
 		super().__init__()
+
+		self.cachedir = cachedir
+		if self.cachedir is not None:
+			self.cachedir = osp.join(cachedir, "cond")
+			os.makedirs(self.cachedir)
+
 		embedders = []
 		for n, embedder in enumerate(emb_models):
 			assert isinstance(
@@ -38,6 +58,10 @@ class Conditioner(nn.Module):
 				for param in embedder.parameters():
 					param.requires_grad = False
 				embedder.eval()
+			if self.cachedir is not None and embedder.is_cachable:
+				os.makedirs(
+					osp.join(self.cachedir, embedder.__class__.__name__)
+				)
 			print(
 				f"Initialized embedder #{n}: {embedder.__class__.__name__} "
 				f"with {count_params(embedder, False)} params. Trainable: {embedder.is_trainable}"
@@ -46,38 +70,63 @@ class Conditioner(nn.Module):
 		self.embedders = nn.ModuleList(embedders)
 
 
+	def get_emb(self, embedder, cond, vae):
+		all_cache_files_available = False
+		if self.cachedir is not None and embedder.is_cachable:
+			cache_files = [
+				osp.join(self.cachedir, embedder.__class__.__name__, f"{_id}.t") 
+				for _id in cond["id"]
+			]
+			all_cache_files_available = all(
+				[osp.exists(cf) for cf in cache_files]
+			)
+			if all_cache_files_available:
+				emb_out = th.stack([th.load(cf) for cf in cache_files])
+
+		if not all_cache_files_available:
+			emb_out = embedder(*[cond[k] for k in embedder.input_keys])
+
+		assert isinstance(
+			emb_out, th.Tensor
+		), f"encoder outputs must be tensors {type(emb_out)}"
+
+		if isinstance(embedder, BBoxAppendEmbedder):
+			out_key = "bboxes"
+		else:
+			out_key = self.OUTPUT_DIM2KEYS[emb_out.dim()]
+
+		if all_cache_files_available:
+			return emb_out, out_key
+
+		if self.cachedir is not None and embedder.is_cachable:
+			for emb, f in zip(emb_out, cache_files):
+				th.save(emb, f)
+
+		return emb_out, out_key
+
+
 	def forward(self, cond, vae=None):
 		output = dict()
 		for embedder in self.embedders:
 			embedding_context = nullcontext if embedder.is_trainable else th.no_grad
 			with embedding_context():
-				emb_out = embedder(*[cond[k] for k in embedder.input_keys])
-			assert isinstance(
-				emb_out, (th.Tensor, list, tuple)
-			), f"encoder outputs must be tensors or a sequence, but got {type(emb_out)}"
-			if not isinstance(emb_out, (list, tuple)):
-				emb_out = [emb_out]
-			for emb in emb_out:
-				if isinstance(embedder, BBoxAppendEmbedder):
-					out_key = "bboxes"
-				else:
-					out_key = self.OUTPUT_DIM2KEYS[emb.dim()]
+				emb_out, out_key = self.get_emb(embedder, cond, vae)
 
-				if out_key == "concat":
-					emb = possibly_vae_encode(emb, vae)
-
-				if out_key in output:
-					output[out_key] = th.cat(
-						(output[out_key], emb), self.KEY2CATDIM[out_key]
-					)
-				else:
-					output[out_key] = emb
+			if out_key == "concat":
+				emb_out = possibly_vae_encode(emb_out, vae)
+			
+			if out_key in output:
+				output[out_key] = th.cat(
+					(output[out_key], emb_out), self.KEY2CATDIM[out_key]
+				)
+			else:
+				output[out_key] = emb_out
 		return output
 
 
 class ClassEmbedder(AbstractEmbModel):
-	def __init__(self, embed_dim, n_classes=10, add_sequence_dim=False):
-		super().__init__()
+	def __init__(self, embed_dim, n_classes=10, add_sequence_dim=False, **kwargs):
+		super().__init__(**kwargs)
 		self.embedding = nn.Embedding(n_classes, embed_dim)
 		self.n_classes = n_classes
 		self.add_sequence_dim = add_sequence_dim
@@ -90,16 +139,16 @@ class ClassEmbedder(AbstractEmbModel):
 
 
 class ImageConcatEmbedder(AbstractEmbModel):
-	def __init__(self):
-		super().__init__()
+	def __init__(self, **kwargs):
+		super().__init__(**kwargs)
 
 	def forward(self, img):
 		return img
 	
 
 class BBoxAppendEmbedder(AbstractEmbModel):
-	def __init__(self):
-		super().__init__()
+	def __init__(self, **kwargs):
+		super().__init__(**kwargs)
 
 	def forward(self, bboxes):
 		return bboxes
@@ -122,8 +171,9 @@ class ViTExemplarEmbedder(AbstractEmbModel):
 		vit_size="B",
 		freeze_backbone=True,
 		remove_sequence_dim=False,
+		**kwargs
 	):
-		super().__init__()
+		super().__init__(**kwargs)
 
 		try:
 			from detectron2.modeling import SimpleFeaturePyramid, ViT
@@ -247,8 +297,9 @@ class RoIAlignExemplarEmbedder(AbstractEmbModel):
 		spatial_scale=0.125,
 		remove_sequence_dim=False,
 		mlp_ratio=4,
+		**kwargs
 	):
-		super().__init__()
+		super().__init__(**kwargs)
 
 		self.in_channels = in_channels
 		self.out_channels = out_channels
@@ -324,8 +375,9 @@ class LightRoIAlignExemplarEmbedder(AbstractEmbModel):
 		roi_output_size,
 		spatial_scale=0.125,
 		remove_sequence_dim=False,
+		**kwargs
 	):
-		super().__init__()
+		super().__init__(**kwargs)
 
 		self.skip_out = True if out_channels == "adaptive" else False
 		self.in_channels = in_channels
@@ -376,8 +428,8 @@ class LightRoIAlignExemplarEmbedder(AbstractEmbModel):
 class ConcatTimestepEmbedderND(AbstractEmbModel):
 	"""embeds each dimension independently and concatenates them"""
 
-	def __init__(self, outdim):
-		super().__init__()
+	def __init__(self, outdim, **kwargs):
+		super().__init__(**kwargs)
 		self.outdim = outdim
 
 	def forward(self, x):
@@ -392,72 +444,69 @@ class ConcatTimestepEmbedderND(AbstractEmbModel):
 
 
 
-class SAM2ExemplarMaskEmbedder(AbstractEmbModel):
+class SAMExemplarMaskEmbedder(AbstractEmbModel):
 
-	def __init__(self, checkpoint, score_threshold=0.7, multiply_by_score=False):
-		super().__init__()
-		try:
-			from sam2.build_sam import build_sam2 #type: ignore
-			from sam2.sam2_image_predictor import SAM2ImagePredictor #type: ignore
-		except ImportError:
-			raise ImportError("sam2 is required for SAM2ImageMaskEmbedder")
-		
+	def __init__(
+		self, 
+		checkpoint, 
+		score_threshold=0.6, 
+		multiply_by_score=False,
+		dtype="float32",
+		**kwargs
+	):
+		super().__init__(**kwargs)
 
+		assert self.is_trainable == False
 		self.ckpt_full_path = checkpoint
 		self.score_threshold = score_threshold
 		self.multiply_by_score = multiply_by_score
+		self.dtype = getattr(th, dtype)
 
-		ckpt, _ = osp.splitext(osp.basename(osp.normpath(checkpoint)))
-		if ckpt == "sam2_hiera_large":
-			self.model_cfg = "sam2_hiera_l.yaml"
-		elif ckpt == "sam2_hiera_base_plus":
-			self.model_cfg = "sam2_hiera_b+.yaml"
-		elif ckpt == "sam2_hiera_small":
-			self.model_cfg = "sam2_hiera_s.yaml"
-		elif ckpt == "sam2_hiera_tiny":
-			self.model_cfg = "sam2_hiera_t.yaml"
-		else:
-			raise ValueError(f"Invalid checkpoint {checkpoint}")
-		
-		self.model = build_sam2(
-			self.model_cfg, 
-			self.ckpt_full_path, 
-			device="cuda" if th.cuda.is_available() else "cpu"
+		self.model = SamModel.from_pretrained(
+			checkpoint, 
+			low_cpu_mem_usage=True, 
+			torch_dtype=self.dtype
 		)
-		self.predictor = SAM2ImagePredictor(self.model)
+		self.processor = SamProcessor.from_pretrained(checkpoint)
 		
 		
 	def forward(self, img, bboxes):
-		dev = img[0].device
-		img = img.permute(0, 2, 3, 1).cpu().numpy()
-		img = (img + 1.0) / 2.0
-		img = [im for im in img]
+		dev = self.model.device
+		img = (img.permute(0, 2, 3, 1) + 1.0) / 2.0
+
+		inputs = self.processor(
+			img.cpu(), 
+			input_boxes=bboxes.cpu(), 
+			return_tensors="pt", 
+			do_rescale=False
+		).to(dev, self.dtype)
+
+		with th.no_grad():
+			outputs = self.model(**inputs, multimask_output=False)
 		
-		with th.autocast(device_type="cuda", dtype=th.bfloat16):
-			self.predictor.set_image_batch(img)
-			masks_batch, scores_batch, _ = self.predictor.predict_batch(
-				None,
-				None, 
-				box_batch=bboxes, 
-				multimask_output=False
-			)
-		masks_batch = np.stack(masks_batch).squeeze()
-		scores_batch = np.stack(scores_batch)[:, :, None]
+		masks = self.processor.image_processor.post_process_masks(
+			outputs.pred_masks.float().cpu(), 
+			inputs["original_sizes"].cpu(), 
+			inputs["reshaped_input_sizes"].cpu()
+		)
+		scores = outputs.iou_scores
 
-		masks_batch = th.as_tensor(masks_batch, device=dev)
-		scores_batch = th.as_tensor(scores_batch, device=dev)
+		masks = th.stack(masks).squeeze().to(dev, dtype=th.float32)
+		scores = scores.to(dev, dtype=th.float32).unsqueeze(-1)
 
+		mul_ = (scores > self.score_threshold).float()
 		if self.multiply_by_score:
-			masks_batch *= scores_batch
+			mul_ *= scores 
+		masks *= mul_
 
-		return masks_batch
+		return masks
 		
 
 
 class OPEExemplarEmbedder(AbstractEmbModel):
 
-	def __init__():
-		super().__init__()
+	def __init__(self, **kwargs):
+		super().__init__(**kwargs)
 
 
 	def forward(img, bboxes):

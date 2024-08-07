@@ -1,4 +1,5 @@
 import os
+import csv
 import json
 import random
 import numpy as np
@@ -52,21 +53,19 @@ class FSC147(Dataset):
 	def __init__(
 			self,
 			datadir,
-			targetdir,
 			split="train",
 			n_exemplars=3,
 			image_size=512,
 			hflip_p=0.5,
-			cj_p=0.8,
+			cj_p=0.0,
 			sigma=0.5,
 			center_pad=False,
 			bbox_max_size=None,
 			bbox_min_size=None,
-			allow_resize_target=False,
 			target_minmax_norm=False,
+			cachedir=None,
 	):
 		self.datadir = datadir
-		self.targetdir = targetdir
 		self.split = split
 		self.n_exemplars = n_exemplars
 		self.image_size = image_size
@@ -76,24 +75,33 @@ class FSC147(Dataset):
 		self.center_pad = center_pad
 		self.bbox_max_size = bbox_max_size
 		self.bbox_min_size = bbox_min_size
-		self.allow_resize_target = allow_resize_target
 		self.target_minmax_norm = target_minmax_norm
+		self.cachedir = cachedir
 
 		assert self.split in ["train", "train_val", "test_val", "test"]
+		assert isinstance(self.sigma, float) or self.sigma == "adaptive"
+
+		self.adaptive_sigma = self.sigma == "adaptive"
 
 		self.img_names = None
-		with open(os.path.join(self.datadir, 'Train_Test_Val_FSC_147.json'), 'rb') as f:
+		with open(os.path.join(self.datadir, "Train_Test_Val_FSC_147.json"), "rb") as f:
 			_split = "val" if self.split in ["train_val", "test_val"] else self.split
 			self.img_names = json.load(f)[_split]
 
 		self.annotations = None
-		with open(os.path.join(self.datadir, 'annotation_FSC147_384.json'), 'rb') as f:
+		with open(os.path.join(self.datadir, "annotation_FSC147_384.json"), "rb") as f:
 			self.annotations = {k: v for k, v in json.load(f).items() if k in self.img_names}
 
-		os.makedirs(
-			os.path.join(self.datadir, self.targetdir), 
-			exist_ok=True
-		)
+		self.img_classes = None
+		with open(os.path.join(self.datadir, "ImageClasses_FSC147.txt"), "r") as f:
+			self.img_classes = {k: v for (k, v) in csv.reader(f, delimiter="\t")}
+
+		if split in ["train", "train_val"]:
+			assert self.cachedir is not None
+			self.targetdir = os.path.join(self.cachedir, "targets")
+			if self.adaptive_sigma:
+				self.targetdir = os.path.join(self.datadir, "gt_densitymaps_adaptive_384_VarV2")
+			os.makedirs(self.targetdir, exist_ok=True)
 
 
 	def generate_density_map(self, src_size, new_size, points):
@@ -131,7 +139,7 @@ class FSC147(Dataset):
 		bboxes = adjust_bboxes(bboxes, scale_factor=scale, padding=padding)
 		assert img.shape[-1] == img.shape[-2] == self.image_size
 		
-		img = img * 2.0 - 1.0
+		img = (img * 2.0 - 1.0).clamp(-1.0, 1.0)
 		return img, bboxes, False, new_size
 
 
@@ -163,7 +171,7 @@ class FSC147(Dataset):
 		if th.rand(1) < self.cj_p:
 			img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)(img)
 
-		img = img * 2.0 - 1.0
+		img = (img * 2.0 - 1.0).clamp(-1.0, 1.0)
 		return img, bboxes, hflip, new_size
 
 
@@ -194,7 +202,7 @@ class FSC147(Dataset):
 		target = F.to_tensor(target)
 
 		# Resize if necessery
-		if target_size is not None and self.allow_resize_target:
+		if target_size is not None:
 			target = resize_dm(target, target_size)
 
 		# Pad
@@ -210,7 +218,7 @@ class FSC147(Dataset):
 			_tmin = target.min()
 			target = (target - _tmin) / (_tmax - _tmin)
 
-		target = target * 2.0 - 1.0
+		target = (target * 2.0 - 1.0).clamp(-1.0, 1.0)
 		return target
 
 
@@ -248,11 +256,11 @@ class FSC147(Dataset):
 
 		img_id = os.path.splitext(self.img_names[index])[0]
 		npypath = os.path.join(
-			self.datadir,
 			self.targetdir, 
 			img_id + '.npy'
-		)
-		if os.path.exists(npypath):
+		) if self.cachedir is not None else None
+
+		if npypath is not None and os.path.exists(npypath):
 			target = np.load(npypath)
 		else:
 			target = self.generate_density_map(
@@ -260,12 +268,13 @@ class FSC147(Dataset):
 				new_size,
 				points
 			)
-			np.save(npypath, target)
+			if self.split in ["train", "train_val"]:
+				np.save(npypath, target)
 
 		target = self.target_transform(
 			target,
 			hflip, 
-			target_size=new_size if self.allow_resize_target else None
+			target_size=new_size if self.adaptive_sigma else None
 		)
 		assert target.shape[-2:] == img.shape[-2:], "target shape does not match image shape."
 		return target, dict(bboxes=bboxes, img=img, count=target_count, id=img_id)

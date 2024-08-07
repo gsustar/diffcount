@@ -67,11 +67,12 @@ conditioner:
       input_keys: ["bboxes"]
       is_trainable: False
     
-    - type: "SAM2ExemplarMaskEmbedder"
+    - type: "SAMExemplarMaskEmbedder"
       input_keys: ["img", "bboxes"]
       is_trainable: False
+      is_cachable: True
       params:
-        checkpoint: ../sam2_hiera_large.pt
+        checkpoint: "facebook/sam-vit-base"
 
     # - type: "RoIAlignExemplarEmbedder"
     #   input_keys: ["z_img", "bboxes"]
@@ -99,7 +100,6 @@ data:
     name: "FSC147"
     params:
       datadir: ../FSC147_384_V2/
-      targetdir: densitymaps/debugging
       n_exemplars: 3
       image_size: 512
       hflip_p: 0.5
@@ -108,7 +108,6 @@ data:
       center_pad: True
       bbox_max_size: 50
       bbox_min_size: null
-      allow_resize_target: False
       target_minmax_norm: True
 
   dataloader:
@@ -118,11 +117,11 @@ data:
 
 train:
   lr: 1.e-4
-  num_epochs: 10000
+  num_epochs: 50
   grad_clip: 1.0
   use_fp16: False
   ema_rate: 0.9999
-  validation_interval: 10
+  validation_interval: 100
   resume_checkpoint: null
   weight_decay: 0.0
   lr_scheduler: null

@@ -5,6 +5,7 @@ import numpy as np
 import torch as th
 import torch.nn as nn
 import os.path as osp
+import string
 
 from types import SimpleNamespace
 from diffusers import AutoencoderKL
@@ -64,14 +65,14 @@ def create_diffusion(diffusion_config):
 	return diffusion
 
 
-def create_data(data_config, train=True):
-	#todo if keep original aspect ratio or image size, make sure the batch size is one
+def create_data(data_config, train=True, cachedir=None):
 	splits = ['train', 'train_val', None] if train else [None, 'test_val', 'test']
 	if data_config.dataset.name == "FSC147":
 		train_dataset, val_dataset, test_dataset = (
 			FSC147(
 				**vars(data_config.dataset.params),
-				split=split
+				split=split,
+				cachedir=cachedir
 			) if split else None for split in splits
 		)
 	elif data_config.dataset.name == "MNIST":
@@ -109,16 +110,19 @@ def create_data(data_config, train=True):
 	return train_data, val_data, test_data
 
 
-def create_conditioner(conditioner_config, train=True):
+def create_conditioner(conditioner_config, train=True, cachedir=None):
 	embedders = []
 	for embconf in conditioner_config.embedders:
 		params = vars(embconf.params) if hasattr(embconf, "params") else {}
-		emb = getattr(cond, embconf.type)(**params)
-		emb.is_trainable = getattr(embconf, "is_trainable", False) if train else False
-		emb.ucg_rate = getattr(embconf, "ucg_rate", 0.0) if train else 0.0
-		emb.input_keys = embconf.input_keys
+		emb = getattr(cond, embconf.type)(
+			**params, 
+			input_keys=embconf.input_keys,
+			is_trainable=getattr(embconf, "is_trainable", False) if train else False, 
+			ucg_rate=getattr(embconf, "ucg_rate", 0.0) if train else 0.0, 
+			is_cachable=getattr(embconf, "is_cachable", False),
+		)
 		embedders.append(emb)
-	return cond.Conditioner(embedders)
+	return cond.Conditioner(embedders, cachedir=cachedir)
 
 
 def create_vae(vae_config, device):
@@ -310,6 +314,12 @@ def create_denoise_diffusion(
 		t_mse_weighting_scheme=t_mse_weighting_scheme,
 		t_cb_count_weighting_scheme=t_cb_count_weighting_scheme,
 	)
+
+
+def create_cachedir(datadir, runname):
+	cdirpath = osp.join(datadir, "cache", runname)
+	os.makedirs(cdirpath)
+	return cdirpath
 
 
 def seed_everything(seed):
