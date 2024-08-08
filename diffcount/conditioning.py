@@ -70,11 +70,11 @@ class Conditioner(nn.Module):
 		self.embedders = nn.ModuleList(embedders)
 
 
-	def get_emb(self, embedder, cond, vae):
+	def get_emb(self, embedder, cond):
 		all_cache_files_available = False
 		if self.cachedir is not None and embedder.is_cachable:
 			cache_files = [
-				osp.join(self.cachedir, embedder.__class__.__name__, f"{_id}.t") 
+				osp.join(self.cachedir, embedder.__class__.__name__, f"{_id}.pt") 
 				for _id in cond["id"]
 			]
 			all_cache_files_available = all(
@@ -100,7 +100,7 @@ class Conditioner(nn.Module):
 
 		if self.cachedir is not None and embedder.is_cachable:
 			for emb, f in zip(emb_out, cache_files):
-				th.save(emb, f)
+				th.save(emb.contiguous().clone(), f)
 
 		return emb_out, out_key
 
@@ -110,7 +110,7 @@ class Conditioner(nn.Module):
 		for embedder in self.embedders:
 			embedding_context = nullcontext if embedder.is_trainable else th.no_grad
 			with embedding_context():
-				emb_out, out_key = self.get_emb(embedder, cond, vae)
+				emb_out, out_key = self.get_emb(embedder, cond)
 
 			if out_key == "concat":
 				emb_out = possibly_vae_encode(emb_out, vae)
@@ -122,6 +122,15 @@ class Conditioner(nn.Module):
 			else:
 				output[out_key] = emb_out
 		return output
+
+
+	def state_dict(self):
+		sd = super().state_dict()
+		for i, embedder in enumerate(self.embedders):
+			if not embedder.is_trainable:
+				for k in embedder.state_dict().keys():
+					del sd[f"embedders.{i}.{k}"]
+		return sd
 
 
 class ClassEmbedder(AbstractEmbModel):
@@ -491,7 +500,7 @@ class SAMExemplarMaskEmbedder(AbstractEmbModel):
 		)
 		scores = outputs.iou_scores
 
-		masks = th.stack(masks).squeeze().to(dev, dtype=th.float32)
+		masks = th.stack(masks).squeeze(dim=2).to(dev, dtype=th.float32)
 		scores = scores.to(dev, dtype=th.float32).unsqueeze(-1)
 
 		mul_ = (scores > self.score_threshold).float()

@@ -230,9 +230,9 @@ class TrainLoop:
 				"epoch": self.epoch,
 				"step": self.step,
 				"model": self.model.state_dict(),
-				"optimizer": self.opt.state_dict(),
-				"scheduler": self.sch.state_dict() if self.sch is not None else None,
-				"scaler": self.scaler.state_dict(),
+				# "optimizer": self.opt.state_dict(),
+				# "scheduler": self.sch.state_dict() if self.sch is not None else None,
+				# "scaler": self.scaler.state_dict(),
 				"ema": self.ema.state_dict(),
 				"conditioner": self.conditioner.state_dict()
 			}
